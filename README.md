@@ -91,3 +91,4 @@ This is an alpha: the verdicts are conservative and the edges are rough. What he
   is common and safe (it never means "probabilistic"); macOS and Linux only (POSIX); Python 3.12+ and Lean 4 are required; the rule scan is not an
   OS sandbox (`SECURITY.md`); a person signs off `Rule.lean` against the written policy before it replaces anything.
 - **Update:** `/plugin marketplace update tinyai-labs`. No telemetry: the scripts make no network calls.
+- **Join the alpha:** [sign up here](https://forms.gle/Wg8fFDhCu84mF8Mu7) to hear about updates.
