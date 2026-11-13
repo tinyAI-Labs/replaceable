@@ -47,19 +47,6 @@ for `DETERMINISTIC_CORE_FALLBACK`, none otherwise) and the tokens saved, with th
 Without a count the answer is `unknown`: nothing is estimated from text length, because a log line shows the source material at best, not the prompt,
 the tool calls or the retries. Token counts never reach the rule or the verdict. Prices are out of scope: multiply by your own rate.
 
-## Honest limits
-- On our own benchmark (unpublished) the verdicts for loops written independently of the solver were right about half the time; every miss was `INCONCLUSIVE` or a
-  fallback, none a false `DETERMINISTIC`. A policy with 8 to 30 branches realistically needs 1000+ logged runs, not 200.
-- The verdict is about the logged period. A rule that held on the held-back half can still drift later: re-run on new logs.
-- `DETERMINISTIC` means "a rule reproduced the unseen cases", not "the rule is the policy". A person compares `Rule.lean` with the written policy.
-- The rule language is small on purpose: thresholds, ratios, categories, a few derived quantities (products, differences, date parts, anything you
-  offer with `--derive`). A deterministic loop outside that language ends `INCONCLUSIVE`, not `PROBABILISTIC`.
-- With scope `decision_step_only` only the decision on typed fields is tested; the extraction that produced the fields stays with the LLM, and the
-  token saving is then an upper bound.
-- The saving is an estimate from the logged mix of cases, and it is only as good as the logged counts (one line = one whole run).
-- Lean runs the rule under a token scan and time limits, not an OS sandbox; POSIX only.
-- The held-out guarantee needs the host: the scripts refuse to fit on the held-back half and allow one replay, but cannot stop an agent that reads
-  files. Keep `logs/heldout.jsonl` away from the agent and answer its request with `host_replay.py` (see `SKILL.md`, "For the host").
 
 ## Layout
     skills/replaceable/SKILL.md          the procedure the agent follows, the hard rules, the verdict table
