@@ -1,0 +1,26 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  manifests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Manifests are valid and name the same plugin
+        run: |
+          jq -e . .claude-plugin/plugin.json .claude-plugin/marketplace.json > /dev/null
+          jq -e --slurpfile p .claude-plugin/plugin.json '.plugins[0].name == $p[0].name' .claude-plugin/marketplace.json
