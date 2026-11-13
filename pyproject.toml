@@ -2,7 +2,7 @@
 [tool.ruff]
 line-length = 150
 indent-width = 2
-target-version = "py39"
+target-version = "py312"
 
 [tool.ruff.format]
 exclude = ["*"]  # the formatter is off: the dense style is written by hand and held by the lint rules and sz.py

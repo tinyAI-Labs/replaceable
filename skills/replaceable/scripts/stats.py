@@ -7,7 +7,7 @@ from pathlib import Path
 from statistics import median
 from typing import Any, Sequence
 
-if sys.version_info < (3, 9): raise SystemExit("these scripts need Python 3.9 or newer (this is %d.%d)" % sys.version_info[:2])
+if sys.version_info < (3, 12): raise SystemExit("these scripts need Python 3.12 or newer (this is %d.%d)" % sys.version_info[:2])
 
 Row = dict[str, Any]  # one logged case: {case_id, ts, typed_input, output, tokens?}
 Schema = dict[str, Any]  # schema.json: {"input": [{name, type, values?, role?}], "output": {name, values}}
