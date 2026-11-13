@@ -1,5 +1,5 @@
 {
-  "name": "replaceable",
+  "name": "tinyai-labs",
   "description": "Agent skills for finding which loops need an LLM and which can be a fixed rule.",
   "owner": { "name": "tinyAI Labs" },
   "plugins": [
