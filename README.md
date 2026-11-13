@@ -37,7 +37,8 @@ To try it first, copy `examples/raw.jsonl` (600 runs of a shipping loop) into an
 
 `raw.jsonl` has one logged run per line: `{"typed_input": {...}, "output": ..., "ts": ..., "tokens": 1840}`. `typed_input` holds numbers, booleans,
 dates and categories; `ts`, `case_id` and the token count are optional. At least 150 runs are needed. `run.py` asks at most one question (the scope:
-were the typed fields extracted from documents by the loop itself?) and prints the exact command to answer it.
+were the typed fields extracted from documents by the loop itself?) and prints the exact command to answer it. `Rule.lean` is always the
+rule the solver fitted: `run.py` overwrites an edited one before the exam, and an edit after the exam turns the verdict INCONCLUSIVE.
 
 ## Your own log
 One JSON object per line (JSONL); a JSON array or a CSV has to be converted first. Each line is one run of the loop: the typed fields the decision

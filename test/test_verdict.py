@@ -46,22 +46,21 @@ class TestVerdictBuild(unittest.TestCase):
   def test_exits_before_the_rule(self):
     for name, stage in (("OUT_OF_SCOPE", "triage"), ("INCONCLUSIVE", "triage"), ("INCONCLUSIVE", "types"), ("PROBABILISTIC", "conflicts")):
       state = {"proposed": {"verdict": name, "exit_stage": stage, "why": "w"}, "conflicts": {"example_pairs": [["a", "b"], ["c", "d"]]}}
-      built = verdict.build(state, None, None, None, False)
+      built = verdict.build(state, None, None, None)
       self.assertEqual((built["verdict"], built["exit_stage"]), (name, stage))
       self.assertEqual("conflict_pairs" in built, name == "PROBABILISTIC")
   def test_no_replay(self):
-    self.assertEqual(verdict.build(self.state, None, "rule", None, False)["needs"], "replay")
-    self.assertEqual(verdict.build(self.state, None, "rule", None, True)["exit_stage"], "checker")
+    self.assertEqual(verdict.build(self.state, None, "rule", None)["needs"], "replay")
   def test_rule_changed_after_replay(self):
-    self.assertEqual(verdict.build(self.state, self.receipt(), "edited", None, False)["verdict"], "INCONCLUSIVE")
-    self.assertEqual(verdict.build(self.state, self.receipt(), "rule", None, False)["verdict"], "DETERMINISTIC")
+    self.assertEqual(verdict.build(self.state, self.receipt(), "edited", None)["verdict"], "INCONCLUSIVE")
+    self.assertEqual(verdict.build(self.state, self.receipt(), "rule", None)["verdict"], "DETERMINISTIC")
   def test_scope(self):
     asked = {**self.state, "triage": {"scope": "full", "scope_question": "q"}}
-    self.assertEqual(verdict.build(asked, self.receipt(), "rule", None, False)["needs"], "scope")
-    built = verdict.build(asked, self.receipt(), "rule", "decision_step_only", False)
+    self.assertEqual(verdict.build(asked, self.receipt(), "rule", None)["needs"], "scope")
+    built = verdict.build(asked, self.receipt(), "rule", "decision_step_only")
     self.assertEqual(built["scope"], "decision_step_only")
     self.assertIn("extraction step", built["rationale"])
-    self.assertNotIn("scope", verdict.build(asked, self.receipt(k=100), "rule", None, False))  # no deterministic claim, no scope needed
+    self.assertNotIn("scope", verdict.build(asked, self.receipt(k=100), "rule", None))  # no deterministic claim, no scope needed
 
 class TestTokenBlock(unittest.TestCase):
   def block(self, name, early=None, receipt=None, **more): return verdict.token_block({"tokens": early}, receipt, {"verdict": name, **more})
@@ -85,6 +84,6 @@ class TestTokenBlock(unittest.TestCase):
   def test_tokens_do_not_reach_the_verdict(self):
     state, receipt = {"triage": {"scope": "full"}, "fit": {}}, {"rule_sha256": stats.sha256("rule"), **report()}
     counted = ({**state, "tokens": stats.token_stats([{"tokens": 5}])}, {**receipt, "tokens": stats.token_stats([{"tokens": 9}])})
-    self.assertEqual(verdict.build(*counted, "rule", None, False), verdict.build(state, receipt, "rule", None, False))
+    self.assertEqual(verdict.build(*counted, "rule", None), verdict.build(state, receipt, "rule", None))
 
 if __name__ == "__main__": unittest.main()
