@@ -47,7 +47,6 @@ for `DETERMINISTIC_CORE_FALLBACK`, none otherwise) and the tokens saved, with th
 Without a count the answer is `unknown`: nothing is estimated from text length, because a log line shows the source material at best, not the prompt,
 the tool calls or the retries. Token counts never reach the rule or the verdict. Prices are out of scope: multiply by your own rate.
 
-
 ## Layout
     skills/replaceable/SKILL.md          the procedure the agent follows, the hard rules, the verdict table
     skills/replaceable/scripts/          prepare, run (= audit + replay + verdict), host_replay, selftest; fit, derive, thresholds, lean, stats
