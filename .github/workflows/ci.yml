@@ -24,3 +24,19 @@ jobs:
         run: |
           jq -e . .claude-plugin/plugin.json .claude-plugin/marketplace.json > /dev/null
           jq -e --slurpfile p .claude-plugin/plugin.json '.plugins[0].name == $p[0].name' .claude-plugin/marketplace.json
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        python: ["3.12", "3.x"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m unittest discover -s test
+      - run: python sz.py
+      - run: pip install ruff==0.17.5 && ruff check .
