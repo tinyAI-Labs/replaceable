@@ -21,19 +21,41 @@ Needs Python 3.12+ (no packages) and Lean 4 on `PATH` (`curl https://elan.lean-l
     /plugin marketplace add tinyAI-Labs/replaceable
     /plugin install replaceable@tinyai-labs
 
-For another agent, copy `skills/replaceable/` to where it keeps skills. Then check the install:
+For another agent, copy `skills/replaceable/` to where it keeps skills. Then check the install (macOS or Linux):
 
-    python3 skills/replaceable/scripts/selftest.py     # nine generated loops with known answers, about a minute
+    S=$(ls -d ~/.claude/plugins/cache/tinyai-labs/replaceable/*/skills/replaceable/scripts | tail -1)   # in a clone: S=skills/replaceable/scripts
+    python3 $S/selftest.py                             # nine generated loops with known answers, about a minute
 
 ## Use
-Give the agent a log and ask whether the loop is replaceable, or run the two commands yourself:
+Give the agent a log and ask whether the loop is replaceable, or run the two commands yourself, in the directory that holds the log:
 
-    python3 skills/replaceable/scripts/prepare.py raw.jsonl   # types the log, splits it by time into logs/early.jsonl and logs/heldout.jsonl
-    python3 skills/replaceable/scripts/run.py                 # audit, one-shot replay, verdict: ends with VERDICT / WHY / TOKENS and verdict.json
+    python3 $S/prepare.py raw.jsonl   # types the log, splits it by time into logs/early.jsonl and logs/heldout.jsonl
+    python3 $S/run.py                 # audit, one-shot replay, verdict: ends with VERDICT / WHY / TOKENS and verdict.json
+
+To try it first, copy `examples/raw.jsonl` (600 runs of a shipping loop) into an empty directory: the output ends with the lines in
+`examples/expected.txt`.
 
 `raw.jsonl` has one logged run per line: `{"typed_input": {...}, "output": ..., "ts": ..., "tokens": 1840}`. `typed_input` holds numbers, booleans,
 dates and categories; `ts`, `case_id` and the token count are optional. At least 150 runs are needed. `run.py` asks at most one question (the scope:
 were the typed fields extracted from documents by the loop itself?) and prints the exact command to answer it.
+
+## Your own log
+One JSON object per line (JSONL); a JSON array or a CSV has to be converted first. Each line is one run of the loop: the typed fields the decision
+was made from, and the decision. From a trace or message-list export, roughly:
+
+    import json
+    with open("raw.jsonl", "w") as out:
+      for run in json.load(open("export.json")):            # one entry per loop run
+        args = run["messages"][0]["content"]                # wherever the structured input lives: tool arguments, a form, a ticket record
+        out.write(json.dumps({
+          "typed_input": {"amount_cents": round(args["amount"] * 100), "country": args["country"], "is_member": args["member"]},
+          "output": run["messages"][-1]["content"].strip(),  # the decision, one of a fixed set of values
+          "ts": run["started_at"],                           # orders the split; without it, file order
+          "tokens": run["usage"]["total_tokens"]}) + "\n")  # optional, for the TOKENS line
+
+- Fields are numbers, booleans, dates (`2024-03-21`) and categories. `prepare.py` stops at anything else (free text, identifiers, nested data) and
+  names the field: convert it (money to whole cents, text to a category) or leave it out with `--drop FIELD`. Drop what the policy cannot depend on.
+- At least 150 runs; a policy with many branches needs about 1000 or more before a rule can pass.
 
 ## Tokens and savings
 Log a token count per run as `tokens` (the run's total), or as the SDKs report it: `usage.input_tokens` + `usage.output_tokens` (cache tokens are
@@ -50,6 +72,7 @@ the tool calls or the retries. Token counts never reach the rule or the verdict.
 ## Layout
     skills/replaceable/SKILL.md          the procedure the agent follows, the hard rules, the verdict table
     skills/replaceable/scripts/          prepare, run (= audit + replay + verdict), host_replay, selftest; fit, derive, thresholds, lean, stats
+    examples/                            a 600-run log and the three lines its run ends with
     test/                                unit tests that need no Lean: bound, verdict table, rule scan, solver, typing, tokens
     sz.py                                the line budget (code lines by `tokenize`, gate in MAX_LINE_COUNT)
 
@@ -58,3 +81,13 @@ the tool calls or the retries. Token counts never reach the rule or the verdict.
 
 Style: 2-space indentation, lines up to 150 characters, dense but not golfed, comments say why (`# NOTE:`), almost no docstrings. The line budget
 is a feature: every script should stay readable in one sitting. See `SECURITY.md` for what the scripts do and do not protect against.
+
+## Alpha
+This is an alpha: the verdicts are conservative and the edges are rough. What helps most is the result on a real loop.
+
+- **Send:** an issue with `verdict.json` and the `WHY:` line, and whether the verdict matches what you know about the loop.
+- **Do not send:** logs, `Rule.lean` or `schema.json`: they carry your field names and your policy.
+- **Limits:** typed decisions only (free text is `OUT_OF_SCOPE`); 150 runs at least, about 1000 or more for many-branch policies; `INCONCLUSIVE`
+  is common and safe (it never means "probabilistic"); macOS and Linux only (POSIX); Python 3.12+ and Lean 4 are required; the rule scan is not an
+  OS sandbox (`SECURITY.md`); a person signs off `Rule.lean` against the written policy before it replaces anything.
+- **Update:** `/plugin marketplace update tinyai-labs`. No telemetry: the scripts make no network calls.

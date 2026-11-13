@@ -1,0 +1,3 @@
+VERDICT: DETERMINISTIC (scope: full)
+WHY: The rule matched 300 of 300 held-back cases (95% lower bound 0.9901); always answering the most common output would match 0.5767.
+TOKENS: 518700 tokens / 600 runs with a count (early + heldout half) = 864.5 per run; rule share 1.0 (DETERMINISTIC: the rule takes over every run); saved per run = 1.0 x 864.5 = 864.5; saved over the log = 1.0 x 518700 = 518700
