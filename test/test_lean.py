@@ -8,7 +8,8 @@ FIELDS = [{"name": "amount", "type": "nat"}, {"name": "vip", "type": "bool"}, {"
 SCHEMA = {"input": FIELDS, "output": {"name": "output", "values": ["approve", "deny"]}}
 
 def report(n=200, k=200, base=0.5):
-  return {"n_heldout": n, "n_match": k, "agreement": round(k / n, 4), "lower_bound": round(stats.clopper_pearson_lower(k, n), 4), "baseline": base, "all_outputs_constant": False}
+  lower = round(stats.clopper_pearson_lower(k, n), 4)
+  return {"n_heldout": n, "n_match": k, "agreement": round(k / n, 4), "lower_bound": lower, "baseline": base, "all_outputs_constant": False}
 
 class TestRuleContract(unittest.TestCase):
   def test_banned_tokens(self):
