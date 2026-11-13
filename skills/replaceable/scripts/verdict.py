@@ -1,5 +1,5 @@
 # the verdict as code: computed from work/audit.json and work/receipt.json, written to verdict.json (the table is in SKILL.md)
-# usage: python3 scripts/verdict.py [--scope full|decision_step_only] [--note "..."] [--no-rule]
+# usage: python3 scripts/verdict.py [--scope full|decision_step_only] [--note "..."]
 from __future__ import annotations
 import argparse, json, sys
 from pathlib import Path
@@ -35,7 +35,7 @@ def verdict_from_replay(replay: dict[str, Any]) -> tuple[str, str]:
     return "INCONCLUSIVE", f"{seen}: below {BOUND_DETERMINISTIC}, and {why}."
   return "INCONCLUSIVE", f"{seen}: below {BOUND_CORE}. No rule was found; that alone does not show the loop is probabilistic."
 
-def build(state: dict[str, Any], receipt: dict[str, Any] | None, rule_src: str | None, scope: str | None, no_rule: bool) -> dict[str, Any]:
+def build(state: dict[str, Any], receipt: dict[str, Any] | None, rule_src: str | None, scope: str | None) -> dict[str, Any]:
   # the verdict object, or {"error": ..., "needs": the missing step} when it cannot be given yet
   proposed = state.get("proposed")
   if proposed:  # triage or conflicts exit: no rule is involved
@@ -48,9 +48,7 @@ def build(state: dict[str, Any], receipt: dict[str, Any] | None, rule_src: str |
           f"{split['share_of_cases_there']:.0%} of early cases have inputs that always received the same output "
           f"({split['inputs_always_same_output']} distinct inputs); a fixed rule could cover those and leave the rest to the LLM.")
     return verdict
-  if receipt is None:
-    if no_rule: return {"verdict": "INCONCLUSIVE", "exit_stage": "checker", "rationale": "No rule that passes the check could be written."}
-    return {"error": f"the held-out replay has not run. Run it as a command on its own: {REPLAY_COMMAND}", "needs": "replay"}
+  if receipt is None: return {"error": f"the held-out replay has not run. Run it as a command on its own: {REPLAY_COMMAND}", "needs": "replay"}
   ran = "failure" not in receipt
   if ran and (rule_src is None or stats.sha256(rule_src) != receipt.get("rule_sha256")):
     return {"verdict": "INCONCLUSIVE", "exit_stage": "replay",
@@ -78,12 +76,9 @@ def build(state: dict[str, Any], receipt: dict[str, Any] | None, rule_src: str |
   if "rule_sha256" in receipt: verdict["rule_sha256"] = receipt["rule_sha256"]
   return verdict
 
-def completed_by(state: dict[str, Any], receipt: dict[str, Any] | None) -> str:
-  # who shaped the rule behind the verdict: the scripts alone, a quantity the reader offered, or a hand-written Rule.lean
-  fit = state.get("fit", {})
-  fitted = fit.get("rule_sha256")
-  if "rule_source" in fit or (receipt is not None and receipt.get("rule_sha256", fitted) != fitted): return "agent-rule"
-  return "agent-derive" if fit.get("derived", {}).get("offered_by_the_reader") else "script-default"
+def completed_by(state: dict[str, Any]) -> str:
+  # who shaped the rule behind the verdict: the scripts alone, or a quantity the reader offered
+  return "agent-derive" if state.get("fit", {}).get("derived", {}).get("offered_by_the_reader") else "script-default"
 
 def token_block(state: dict[str, Any], receipt: dict[str, Any] | None, verdict: dict[str, Any]) -> dict[str, Any]:
   # NOTE: computed after the verdict and from it, never the other way round. Tokens per run come from the counts the log states (early
@@ -106,14 +101,14 @@ def token_block(state: dict[str, Any], receipt: dict[str, Any] | None, verdict: 
     block["note"] = "upper bound: the extraction step stays with the LLM, and the log does not split its tokens from the decision step's"
   return block
 
-def write(scope: str | None = None, note: str | None = None, no_rule: bool = False, rule="Rule.lean", out="verdict.json") -> dict[str, Any]:
+def write(scope: str | None = None, note: str | None = None, rule="Rule.lean", out="verdict.json") -> dict[str, Any]:
   # compute the verdict and write it to `out`; returns it, or {"error": ...} with nothing written
   if not AUDIT_FILE.is_file(): return {"error": f"{AUDIT_FILE} not found. Run first: {AUDIT_COMMAND}", "needs": "audit"}
   state, receipt, rule_path = stats.read_json(AUDIT_FILE), read_receipt(), Path(rule)
-  verdict = build(state, receipt, rule_path.read_text(encoding="utf-8") if rule_path.is_file() else None, scope, no_rule)
+  verdict = build(state, receipt, rule_path.read_text(encoding="utf-8") if rule_path.is_file() else None, scope)
   if "error" in verdict: return verdict
   if note: verdict["rationale"] += f" Note: {note}"
-  verdict["completed_by"] = completed_by(state, receipt)
+  verdict["completed_by"] = completed_by(state)
   verdict["tokens"] = token_block(state, receipt, verdict)
   stats.write_text_atomic(Path(out), json.dumps(verdict, indent=2))
   return verdict
@@ -138,8 +133,7 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="The verdict as code: compute it from the recorded numbers and write verdict.json.")
   parser.add_argument("--scope", choices=("full", "decision_step_only"), default=None, help="override the scope recorded by audit.py")
   parser.add_argument("--note", default=None, help="your own remark, appended to the rationale")
-  parser.add_argument("--no-rule", action="store_true", help="give up at the checker: no compiling rule could be written")
   args = parser.parse_args()
-  verdict = write(args.scope, args.note, args.no_rule)
+  verdict = write(args.scope, args.note)
   stats.emit(verdict if "error" in verdict else {"written": "verdict.json", **verdict})
   sys.exit(1 if "error" in verdict else 0)

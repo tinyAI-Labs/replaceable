@@ -3,7 +3,7 @@
 import sys, token, tokenize
 from pathlib import Path
 
-MAX_LINE_COUNT, TOKENS = 1400, {token.OP, token.NAME, token.NUMBER, token.STRING}
+MAX_LINE_COUNT, TOKENS = 1360, {token.OP, token.NAME, token.NUMBER, token.STRING}
 
 def lines(path):
   tokens = tokenize.generate_tokens(open(path, encoding="utf-8").readline)

@@ -1,10 +1,11 @@
 # the whole procedure in one command: the audit of the early half, the one-shot held-out replay, the verdict
-# usage: python3 scripts/run.py [--scope full|decision_step_only] [--derive "x.account_no % 10"]... [--refit] [--note "..."]
+# usage: python3 scripts/run.py [--scope full|decision_step_only] [--derive "x.account_no % 10"]... [--note "..."]
 # NOTE: it runs every step itself and ends with a `VERDICT:` line. A weak rule is not a question: it takes the exam as it is and ends
 # INCONCLUSIVE. Before the verdict it stops only where it cannot go on alone, with the exact command to continue (NEXT) and the reason
-# (WHY): the scope is undeclared; a --derive expression is not valid Lean; a hand-edited Rule.lean does not pass the check; or the host
+# (WHY): the scope is undeclared; a --derive expression is not valid Lean; or the host
 # keeps the held-back half, in which case the request is left in work/replay_request.json for host_replay.py. --derive has to come with
-# the first call: the exam is taken in the same run. Run again, it resumes from work/audit.json and work/receipt.json.
+# the first call: the exam is taken in the same run, on the rule the solver has just written (a Rule.lean edited by hand is overwritten).
+# Run again, it resumes from work/audit.json and work/receipt.json.
 from __future__ import annotations
 import argparse, json, sys
 from pathlib import Path
@@ -24,8 +25,8 @@ def current_audit(args: argparse.Namespace) -> dict:
   fit = state.get("fit")
   fresh = ("step" in state and state.get("early_sha256") == stats.sha256(EARLY.read_bytes())
            and (fit is None or (RULE.is_file() and stats.sha256(RULE.read_text(encoding="utf-8")) == fit["rule_sha256"])))
-  if fresh and not (args.scope or args.derive or args.refit): return state
-  return audit.audit(scope=args.scope, derive=args.derive, keep_rule=False if args.refit else None)
+  if fresh and not (args.scope or args.derive): return state
+  return audit.audit(scope=args.scope, derive=args.derive)
 
 def main():
   lean.require_lean()
@@ -34,7 +35,6 @@ def main():
                       help="decision_step_only when the typed inputs were extracted from documents, free text or tool results")
   parser.add_argument("--derive", action="append", default=None, metavar="LEAN_EXPR",
                       help='a quantity you know the policy uses, as a Nat-valued Lean expression of x, e.g. "x.account_no %% 10"; repeatable')
-  parser.add_argument("--refit", action="store_true", help="discard a hand-written Rule.lean and use the fitted rule")
   parser.add_argument("--note", default=None, help="your own remark, appended to the verdict's rationale")
   args = parser.parse_args()
 
@@ -49,11 +49,7 @@ def main():
       stop(f'`{audit.RUN_COMMAND} --derive "<corrected expression>"`, or go on without it: `{audit.RUN_COMMAND}`',
            f"Lean rejected {rejected['expressions']}: {rejected['error'][:400]}. Nothing was fitted with it and no --derive run was used.", 1)
     step = audit.next_step(state)
-    if step["action"] in ("scope", "fix_rule"):
-      print("NEXT: " + audit.next_line(step, via_run=True))
-      stats.show("WHY: " + step["why"])
-      if step["action"] == "fix_rule": stats.show(f"--- {RULE} ---\n" + RULE.read_text(encoding="utf-8").rstrip())
-      sys.exit(1 if step["action"] == "fix_rule" else 0)
+    if step["action"] in ("scope", "broken"): stop(audit.next_line(step, via_run=True), step["why"], int(step["action"] == "broken"))
     # NOTE: when the host keeps the held-back half, name the rule that is ready for the exam and leave the replay to the host
     if step["action"] == "replay" and not HELDOUT.is_file():
       stats.write_text_atomic(REQUEST, json.dumps({"rule": str(RULE), "rule_sha256": stats.sha256(RULE.read_text(encoding="utf-8"))}, indent=2))
@@ -64,7 +60,7 @@ def main():
       report = replay.replay()
       stats.emit(report, trim=("counterexamples",))
       if replay.read_receipt() is None:  # refused without using the replay
-        stop(audit.next_line({"action": "fix_rule"}, via_run=True), f"The replay did not run: {report.get('error')}.", 1)
+        stop(audit.next_line({"action": "broken"}, via_run=True), f"The replay did not run: {report.get('error')}.", 1)
   sys.exit(verdict.conclude(args.scope, args.note))
 
 if __name__ == "__main__": main()

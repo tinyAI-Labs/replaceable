@@ -1,5 +1,5 @@
 # the audit before the exam: triage, conflict scan and rule fitting on the early half, with fixed stopping rules
-# usage: python3 scripts/audit.py [--scope full|decision_step_only] [--derive "x.a * x.b"]... [--n-total N] [--keep-rule | --refit]
+# usage: python3 scripts/audit.py [--scope full|decision_step_only] [--derive "x.a * x.b"]... [--n-total N]
 # NOTE: it reads schema.json, logs/early.jsonl and metadata.json, never the held-out half, stops at the first exit of the procedure and
 # saves what it found to work/audit.json. Run alone it shows the fit without taking the exam; run.py calls it, the replay and the verdict.
 # A rule that is weak on the fields as typed, or needs a fallback region, is fitted again with derived quantities (derive.py and any
@@ -121,35 +121,18 @@ def weak_note(fit: dict[str, Any]) -> str:
     used = len(derived["used_by_the_rule"])
     said += (f" Beyond thresholds and ratios of the typed fields, {derived['searched']['candidates']} derived quantities were tried "
              f"({KINDS}): {f'the rule uses {used} of them' if used else 'none improved the cross-validated agreement'}.")
-  if half is not None and fit["cv_agreement"] is not None and "rule_source" not in fit:
+  if half is not None and fit["cv_agreement"] is not None:
     said += (f" Fitted on half as many cases the rule cross-validates at {half:.1%}, on all of them at {fit['cv_agreement']:.1%}: "
              + ("the agreement is still rising with the number of cases, so this log is too short to settle the loop and a longer one may."
                 if fit["cv_agreement"] - half >= RISING else
                 "it has stopped rising, so a longer log of the same kind is unlikely to change the result."))
   return said
 
-def _early_agreement(types_src: str, source: str, schema: stats.Schema, rows: list[stats.Row]) -> float:
-  # early-half agreement of a rule as written, 0 if it does not compile or run
-  if not lean.check_rule(types_src, source, stats.WORK_DIR).compiled: return 0.0
-  run = lean.run_rule(types_src, source, schema, [r["typed_input"] for r in rows], stats.WORK_DIR)
-  return 0.0 if run.outputs is None else sum(p == r["output"] for p, r in zip(run.outputs, rows)) / len(rows)
-
-def fit_rule(rows: list[stats.Row], schema: stats.Schema, types_path: Path, rule_path: Path, keep_rule: bool | None, derive: list[str],
-             last_fitted: str | None) -> dict[str, Any]:
-  # NOTE: fit, settle which rule stands in Rule.lean, check it and run it on the early half with Lean. A Rule.lean that the solver itself
-  # wrote last time (`last_fitted` is its hash) is always replaced by the new fit. One that differs was written by hand: it is kept when
-  # it matches the early half at least as well (`keep_rule` None), always (True) or never (False).
+def fit_rule(rows: list[stats.Row], schema: stats.Schema, types_path: Path, rule_path: Path, derive: list[str]) -> dict[str, Any]:
+  # NOTE: fit, write the fitted rule to Rule.lean (whatever stood there is overwritten), check it and run it on the early half with Lean
   types_src = types_path.read_text(encoding="utf-8")
   report, source = fit_best(rows, schema, types_src, derive)
-  report["fitted_rule_sha256"] = stats.sha256(source)
-  existing = rule_path.read_text(encoding="utf-8") if rule_path.is_file() else None
-  by_hand = existing is not None and stats.sha256(existing) not in (last_fitted, report["fitted_rule_sha256"])
-  if keep_rule is None: keep_rule = by_hand and _early_agreement(types_src, existing, schema, rows) >= report["early_agreement"]
-  if keep_rule and existing is not None:
-    source = existing
-    report["rule_source"] = ("kept the existing Rule.lean (--refit replaces it); the fit numbers describe the fitted rule, "
-                             "`lean` describes the kept one")
-  else: rule_path.write_text(source, encoding="utf-8")
+  rule_path.write_text(source, encoding="utf-8")
   report["rule_file"], report["rule_sha256"], report["declares_fallback"] = str(rule_path), stats.sha256(source), lean.has_fallback(source)
   check = lean.check_rule(types_src, source, stats.WORK_DIR)
   if not check.compiled: return {**report, "lean": {"compiled": False, "violations": list(check.violations)}}
@@ -159,23 +142,17 @@ def fit_rule(rows: list[stats.Row], schema: stats.Schema, types_path: Path, rule
   if run.fallback is not None: report["lean"]["fallback"] = stats.fallback_stats(rows, run.outputs, run.fallback)
   return report
 
-def preview(fit: dict[str, Any]) -> tuple[float, str]:
-  # NOTE: the early half's honest forecast of the exam for the rule in Rule.lean, (agreement, what it measures). A fitted rule has
-  # `fit.forecast` (cross-validated); a hand-written one only its early agreement, outside its fallback region when it declares one.
-  if "rule_source" not in fit: return forecast(fit)
-  region = fit["lean"].get("fallback")
-  if region and region["outside"]: return 1 - region["misses_outside"] / region["outside"], "of the early cases outside its fallback region"
-  return fit["lean"]["early_agreement"], "of the early cases"
-
 def next_step(state: dict[str, Any]) -> dict[str, str]:
-  # what the procedure does next and why; `action` is verdict, fix_rule, scope or replay. NOTE: a weak rule is not a stop: it goes to the replay.
+  # what the procedure does next and why; `action` is verdict, broken, scope or replay. NOTE: a weak rule is not a stop: it goes to the replay.
   if "proposed" in state: return {"action": "verdict", "why": state["proposed"]["why"]}
   fit = state["fit"]
   if not fit["lean"].get("compiled") or "error" in fit["lean"]:
-    return {"action": "fix_rule", "why": f"Rule.lean did not pass the check or could not be run on the early half: {json.dumps(fit['lean'])[:400]}"}
+    return {"action": "broken", "why": "The fitted rule did not pass the check or could not be run on the early half. That is a fault of the "
+                                       "installation or of the scripts, not a finding about the log; no verdict is written: "
+                                       + json.dumps(fit["lean"])[:400]}
   if "scope_question" in state["triage"]:
     return {"action": "scope", "why": "The scope is your call and nothing declares it: " + state["triage"]["scope_question"]}
-  agreement, measure = preview(fit)
+  agreement, measure = forecast(fit)
   seen = f"The rule matches {agreement:.1%} {measure}"
   if "derive_rejected" in state:
     seen = f"Lean rejected {state['derive_rejected']['expressions']} ({state['derive_rejected']['error'][:300]}); that did not use up a run. " + seen
@@ -189,13 +166,12 @@ def next_line(step: dict[str, str], via_run: bool = False) -> str:
   # the NEXT line: the exact command(s) for a step, phrased for audit.py or for run.py
   again = RUN_COMMAND if via_run else AUDIT_COMMAND
   return {"verdict": f"`{VERDICT_COMMAND}`",
-          "fix_rule": (f"`{again} --refit`, or correct Rule.lean and run `{again}` again; "
-                       f"if no rule can be made to pass: `{VERDICT_COMMAND} --no-rule`"),
+          "broken": f"`python3 {scripts_dir()}/selftest.py` to check the installation",
           "scope": f"`{again} --scope decision_step_only` or `{again} --scope full`",
           "replay": f"`{RUN_COMMAND}`" + ("" if via_run else " (it takes the one-shot exam and writes the verdict)")}[step["action"]]
 
 def audit(log="logs/early.jsonl", heldout="logs/heldout.jsonl", schema="schema.json", types="Types.lean", metadata="metadata.json", rule="Rule.lean",
-          scope: str | None = None, n_total: int | None = None, keep_rule: bool | None = None, derive: list[str] | None = None) -> dict[str, Any]:
+          scope: str | None = None, n_total: int | None = None, derive: list[str] | None = None) -> dict[str, Any]:
   # NOTE: writes work/audit.json (and Rule.lean when a rule is fitted) and returns the saved state. Answers are remembered per log:
   # `scope` None means the scope chosen earlier, and `derive` adds to the expressions offered earlier, so one answer never undoes another.
   stats.WORK_DIR.mkdir(parents=True, exist_ok=True)
@@ -226,8 +202,7 @@ def audit(log="logs/early.jsonl", heldout="logs/heldout.jsonl", schema="schema.j
         kept += offered
         tried.append(offered)
         state["derive_runs"] = len(tried)
-    state["fit"] = fit_rule(rows, schema_, Path(types), Path(rule), keep_rule, kept, previous.get("fitted_rule_sha256"))
-    state["fitted_rule_sha256"] = state["fit"].pop("fitted_rule_sha256")
+    state["fit"] = fit_rule(rows, schema_, Path(types), Path(rule), kept)
   else:
     stage = state.get("conflicts", state["triage"])
     state["proposed"] = {"verdict": stage["exit"], "exit_stage": stage["exit_stage"], "why": stage["why"]}
@@ -255,8 +230,6 @@ if __name__ == "__main__":
   parser.add_argument("--scope", choices=("full", "decision_step_only"), default=None,
                       help="decision_step_only when the typed inputs were extracted from documents, free text or tool results; remembered")
   parser.add_argument("--n-total", type=int, default=None, help="logged cases in total (early + held back), if no metadata.json states it")
-  parser.add_argument("--keep-rule", dest="keep_rule", action="store_true", default=None, help="keep a hand-written Rule.lean in any case")
-  parser.add_argument("--refit", dest="keep_rule", action="store_false", help="overwrite Rule.lean with the fitted rule")
   parser.add_argument("--derive", action="append", default=None, metavar="LEAN_EXPR", help='a quantity you know the policy uses, as a Nat-valued '
                       'Lean expression of x, e.g. "x.account_no %% 10"; repeatable; quantities offered in earlier runs stay on offer')
   args = parser.parse_args()
