@@ -5,7 +5,7 @@ description: Decide whether an agent or child loop does deterministic work (repl
 # Replaceable
 Can the loop be written as a total Lean function of typed inputs that reproduces its logged answers on cases the rule never saw? One command fits a rule on the early half of the log, replays it once on the held-back half and computes the verdict. A weak rule ends INCONCLUSIVE, never DETERMINISTIC.
 
-Needs `python3` 3.9+ (standard library only) and `lean` (Lean 4) on PATH. `scripts/` is the directory next to this file.
+Needs `python3` 3.12+ (standard library only) and `lean` (Lean 4) on PATH. `scripts/` is the directory next to this file.
 
 ## Procedure
 1. In the directory with `schema.json`, `Types.lean` and `logs/early.jsonl`, run `python3 scripts/run.py`. With only a raw log (JSON lines with `typed_input` and `output`), first run `python3 scripts/prepare.py raw.jsonl`.
