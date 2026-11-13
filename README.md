@@ -15,7 +15,7 @@ tokens the replacement would save.
 | `OUT_OF_SCOPE` | the output is free text, not a typed decision |
 
 ## Install
-Needs Python 3.9+ (no packages) and Lean 4 on `PATH` (`curl https://elan.lean-lang.org/elan-init.sh -sSf | sh -s -- -y`; the tested version is in
+Needs Python 3.12+ (no packages) and Lean 4 on `PATH` (`curl https://elan.lean-lang.org/elan-init.sh -sSf | sh -s -- -y`; the tested version is in
 `lean-toolchain`). In Claude Code:
 
     /plugin marketplace add tinyAI-Labs/replaceable
