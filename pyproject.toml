@@ -1,0 +1,39 @@
+# NOTE: no [project] table on purpose: the skill is a folder of standard-library scripts, not a package to install
+[tool.ruff]
+line-length = 150
+indent-width = 2
+target-version = "py39"
+
+[tool.ruff.format]
+exclude = ["*"]  # the formatter is off: the dense style is written by hand and held by the lint rules and sz.py
+
+[tool.ruff.lint]
+# the curated tinygrad set (no blanket "E"/"W"): real bugs and the few layout rules that keep 2-space dense code readable
+select = [
+  "F",      # pyflakes: unused and undefined names (F401, F541, F841 ...)
+  "W6",     # deprecated syntax
+  "E71",    # comparisons to None / True / False
+  "E72",    # type comparisons, bare except
+  "E112",   # no-indented-block
+  "E113",   # unexpected-indentation
+  "E203",   # whitespace-before-punctuation
+  "E272",   # multiple-spaces-before-keyword
+  "E275",   # missing-whitespace-after-keyword
+  "E303",   # too-many-blank-lines
+  "E304",   # blank-line-after-decorator
+  "E501",   # line-too-long
+  "E702",   # multiple-statements-on-one-line-semicolon
+  "E703",   # useless-semicolon
+  "E731",   # lambda-assignment
+  "W191",   # tab-indentation
+  "W291",   # trailing-whitespace
+  "W293",   # blank-line-with-whitespace
+  "UP039",  # unnecessary-class-parentheses
+  "C416",   # unnecessary-comprehension
+  "RET506", # superfluous-else-raise
+  "RET507", # superfluous-else-continue
+  "A",      # builtin shadowing
+  "FURB110",# if-exp-instead-of-or-operator
+  "RUF018", # assignment-in-assert
+]
+preview = true
