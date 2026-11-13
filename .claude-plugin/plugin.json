@@ -1,0 +1,10 @@
+{
+  "name": "replaceable",
+  "version": "0.1.0",
+  "description": "Find out which agent loops can be replaced by a fixed rule, by fitting one on a log and testing it on cases it has never seen.",
+  "author": { "name": "tinyAI Labs" },
+  "homepage": "https://github.com/tinyAI-Labs/replaceable",
+  "repository": "https://github.com/tinyAI-Labs/replaceable",
+  "license": "Apache-2.0",
+  "keywords": ["agents", "determinism", "lean", "audit"]
+}
