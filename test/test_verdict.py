@@ -8,6 +8,10 @@ def report(n=200, k=200, base=0.5, constant=False, low=None, **more):
   low = round(stats.clopper_pearson_lower(k, n), 4) if low is None else low
   return {"n_heldout": n, "n_match": k, "agreement": round(k / n, 4), "lower_bound": low, "baseline": base, "all_outputs_constant": constant, **more}
 
+def model(n=200, k=200, base=0.5, low=None):  # what the tiny model scored on the held-back cases, at the 99% bound
+  low = round(stats.clopper_pearson_lower(k, n, 0.99), 4) if low is None else low
+  return {"model": {"n": n, "n_match": k, "why": "A tiny model reproduced them.", "baseline": base, "lower_bound": low}}
+
 def fallback(inside=40, outside=160, misses_outside=0, bound=0.97):
   return {"fallback": {"inside": inside, "outside": outside, "misses_outside": misses_outside, "outside_lower_bound": bound}}
 
@@ -33,6 +37,16 @@ class TestVerdictTable(unittest.TestCase):
     for weak in (fallback(outside=59), fallback(inside=0), fallback(bound=0.9499), {}):
       self.assertEqual(self.name(report(low=0.85, **weak)), "INCONCLUSIVE")
     self.assertEqual(self.name(report(low=0.7999, **fallback())), "INCONCLUSIVE")
+  def test_tiny_model(self):  # the model only turns an INCONCLUSIVE into a verdict; every other row is decided without it
+    name, why = verdict.verdict_from_replay(report(k=100, **model()))
+    self.assertEqual(name, "DETERMINISTIC_TINYAI")
+    self.assertIn("no readable rule", why)
+    self.assertEqual(self.name(report(k=100, **model(low=0.95))), "DETERMINISTIC_TINYAI")
+    self.assertEqual(self.name(report(k=100, **model(low=0.9499))), "INCONCLUSIVE")
+    self.assertEqual(self.name(report(k=100, **model(low=0.97, base=0.96))), "INCONCLUSIVE")  # no better than always answering the commonest output
+    self.assertEqual(self.name(report(n=59, k=40, **model(n=59, k=59))), "INCONCLUSIVE")
+    self.assertEqual(self.name(report(low=0.98, **model(low=0.0))), "DETERMINISTIC")
+    self.assertEqual(self.name(report(low=0.85, **fallback(), **model())), "DETERMINISTIC_CORE_FALLBACK")
   def test_weak_rule_is_never_probabilistic(self):
     name, why = verdict.verdict_from_replay(report(k=100))
     self.assertEqual(name, "INCONCLUSIVE")
