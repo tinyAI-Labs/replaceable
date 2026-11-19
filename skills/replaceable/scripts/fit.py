@@ -121,7 +121,8 @@ class Fitter:
     self._code = [self.order.index(o) if o in self.order else len(self.order) for o in outputs]  # outputs as small integers
     self._xlogx = [0.0, *(k * log2(k) for k in range(1, len(inputs) + 1))]
     self.axes = [Test("le", n) for n in numbers]
-    paired = [n for n in numbers if not fields[n].get("derived")]  # a derived quantity is only compared with a threshold
+    # a derived quantity or a date (YYYYMMDD: 20271231 and 20280101 are a day apart) is only compared with a threshold
+    paired = [n for n in numbers if not fields[n].get("derived") and not fields[n].get("unit", "").startswith("calendar date")]
     if len(paired) > MAX_PAIR_FIELDS:  # keep the pair tests affordable: pair only the most informative numbers
       gains = {n: self._best_cut(list(range(len(inputs))), Test("le", n))[0] for n in paired}
       paired = sorted(paired, key=lambda n: -gains[n])[:MAX_PAIR_FIELDS]
