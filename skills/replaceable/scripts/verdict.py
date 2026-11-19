@@ -67,7 +67,7 @@ def build(state: dict[str, Any], receipt: dict[str, Any] | None, rule_src: str |
   if name == "DETERMINISTIC_CORE_FALLBACK":
     verdict["fallback_region"] = fit.get("fallback", {}).get("region") or "the region where `fallback` in Rule.lean is true"
   if name == "INCONCLUSIVE" and ran and receipt["lower_bound"] < BOUND_DETERMINISTIC: verdict["rationale"] += weak_note(fit)
-  if name == "INCONCLUSIVE" and scan.get("near") and ran:
+  if name == "INCONCLUSIVE" and (scan.get("near") or {}).get("neighbour_disagreement") is not None and ran:
     verdict["rationale"] += (f" Diagnostic: {scan['near']['neighbour_disagreement']:.0%} of early cases differ from their nearest neighbour (random "
                              f"pairs: {scan['near']['chance']:.0%}); a high share points to noise or an unlogged input rather than a missed rule.")
   if scan.get("reading") == "one_group":

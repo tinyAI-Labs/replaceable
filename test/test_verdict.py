@@ -49,6 +49,14 @@ class TestVerdictBuild(unittest.TestCase):
       built = verdict.build(state, None, None, None)
       self.assertEqual((built["verdict"], built["exit_stage"]), (name, stage))
       self.assertEqual("conflict_pairs" in built, name == "PROBABILISTIC")
+  def test_inconclusive_when_no_input_repeats_and_nothing_was_compared(self):  # a complete cross product (UCI Car) has no neighbour to disagree with
+    near = {"compared": 0, "neighbour_disagreement": None, "chance": None, "closest_differing_pairs": []}
+    state = {**self.state, "conflicts": {"near": near}}
+    built = verdict.build(state, self.receipt(k=100), "rule", None)
+    self.assertEqual(built["verdict"], "INCONCLUSIVE")
+    self.assertNotIn("Diagnostic", built["rationale"])
+    near = {**near, "compared": 40, "neighbour_disagreement": 0.25, "chance": 0.5}
+    self.assertIn("25%", verdict.build({**self.state, "conflicts": {"near": near}}, self.receipt(k=100), "rule", None)["rationale"])
   def test_no_replay(self):
     self.assertEqual(verdict.build(self.state, None, "rule", None)["needs"], "replay")
   def test_rule_changed_after_replay(self):
