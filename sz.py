@@ -5,14 +5,21 @@ from pathlib import Path
 
 MAX_LINE_COUNT, TOKENS = 1360, {token.OP, token.NAME, token.NUMBER, token.STRING}
 
+MAX_TINYAI_LINES = 100  # the optional tiny-model code in scripts/tinyai/ has a budget of its own: the core budget stays the size of the skill
+
 def lines(path):
   tokens = tokenize.generate_tokens(open(path, encoding="utf-8").readline)
   return len({n for t in tokens if t.type in TOKENS for n in range(t.start[0], t.end[0] + 1)})
 
-if __name__ == "__main__":
-  root = Path(__file__).parent
-  table = sorted((lines(p), str(p.relative_to(root))) for p in root.glob("skills/*/scripts/*.py"))
+def over(root, pattern, budget):
+  # print the code lines of the files matching `pattern` and their total; True when the total is over `budget`
+  table = sorted((lines(p), str(p.relative_to(root))) for p in root.glob(pattern))
   for n, name in table: print(f"{n:6d}  {name}")
   total = sum(n for n, _ in table)
-  print(f"{total:6d}  total (budget {MAX_LINE_COUNT})")
-  sys.exit(f"over the line budget: {total} > {MAX_LINE_COUNT}" if total > MAX_LINE_COUNT else 0)
+  print(f"{total:6d}  total (budget {budget})")
+  return total > budget
+
+if __name__ == "__main__":
+  root = Path(__file__).parent
+  core, tinyai = over(root, "skills/*/scripts/*.py", MAX_LINE_COUNT), over(root, "skills/*/scripts/tinyai/*.py", MAX_TINYAI_LINES)
+  sys.exit("over the line budget" if core or tinyai else 0)
