@@ -141,9 +141,12 @@ def main():
   args = parser.parse_args()
 
   rows, other = [], {}  # other: what the raw lines carry next to the typed fields, with one example each
-  for n, raw in enumerate(stats.read_jsonl(args.log)):
+  try: lines = stats.read_jsonl(args.log)
+  except ValueError: lines = [None]  # not JSON at all (a CSV): reported like any line that is not a case
+  for n, raw in enumerate(lines):
     typed = raw.get("typed_input", raw.get("input")) if isinstance(raw, dict) else None
-    if not isinstance(typed, dict) or "output" not in raw: fail(f"line {n + 1} needs `typed_input` (an object of fields) and `output`")
+    if not isinstance(typed, dict) or "output" not in raw:
+      fail(f"line {n + 1} needs `typed_input` (an object of fields) and `output`; JSON lines only: a CSV or JSON array has to be converted first")
     for key in set(raw) - {"case_id", "ts", "typed_input", "input", "output"} - stats.TOKEN_KEYS: other.setdefault(key, raw[key])
     tokens = stats.row_tokens(raw)  # NOTE: kept next to the typed input, never inside it: a token count must not become a rule input
     rows.append({"case_id": str(raw.get("case_id", f"c{n:05d}")), "ts": raw.get("ts", n), "typed_input": typed, "output": raw["output"],
