@@ -32,13 +32,32 @@ Give the agent a log and ask whether the loop is replaceable, or run the two com
     python3 $S/prepare.py raw.jsonl   # types the log, splits it by time into logs/early.jsonl and logs/heldout.jsonl
     python3 $S/run.py                 # audit, one-shot replay, verdict: ends with VERDICT / WHY / TOKENS and verdict.json
 
-To try it first, copy `examples/raw.jsonl` (600 runs of a shipping loop) into an empty directory: the output ends with the lines in
-`examples/expected.txt`.
+To try it first, copy `examples/shipping/raw.jsonl` (600 runs of a shipping loop) into an empty directory: the output ends with
+`VERDICT: DETERMINISTIC`, then the `WHY:` and `TOKENS:` lines. Nine more examples are below.
 
 `raw.jsonl` has one logged run per line: `{"typed_input": {...}, "output": ..., "ts": ..., "tokens": 1840}`. `typed_input` holds numbers, booleans,
 dates and categories; `ts`, `case_id` and the token count are optional. At least 150 runs are needed. `run.py` asks at most one question (the scope:
 were the typed fields extracted from documents by the loop itself?) and prints the exact command to answer it. `Rule.lean` is always the
 rule the solver fitted: `run.py` overwrites an edited one before the exam, and an edit after the exam turns the verdict INCONCLUSIVE.
+
+## Examples
+Ten synthetic loops with a known answer, in `examples/<name>/raw.jsonl`. Run any of them as above, or all of them with `sh examples/check.sh`.
+
+| example | the loop | verdict |
+|---|---|---|
+| `shipping` | picks a shipping method from weight, distance, zone and express | DETERMINISTIC |
+| `loan_ratio` | approves when debt is at most 35% of income: a ratio of two fields | DETERMINISTIC |
+| `noisy_rule` | a clear score rule that the LLM gets wrong 1% of the time: a rule still beats it | DETERMINISTIC |
+| `fallback_region` | a rule everywhere, except big accounts where a person decides case by case | DETERMINISTIC_CORE_FALLBACK |
+| `constant` | always the same answer | CONSTANT |
+| `lead_scoring_llm` | the same inputs get different answers: the LLM is guessing | PROBABILISTIC |
+| `mostly_rule` | review sentiment: only 3-star reviews are a judgement call | PROBABILISTIC (it names the inputs that disagree) |
+| `moderation_hidden_text` | decided on a text that is not among the logged fields | INCONCLUSIVE |
+| `many_branch_policy` | a real rule, with its own limit per region and tier: too many branches to read | INCONCLUSIVE |
+| `chatbot_reply` | free-text answers, not a classification | OUT_OF_SCOPE |
+
+Two things to try. Flip 15% of the outputs in `noisy_rule`: it becomes PROBABILISTIC, because identical inputs now disagree. Delete the `debt` field
+from every line of `loan_ratio`: it becomes INCONCLUSIVE, because the input that decides is no longer logged.
 
 ## Your own log
 One JSON object per line (JSONL); a JSON array or a CSV has to be converted first. Each line is one run of the loop: the typed fields the decision
@@ -73,12 +92,12 @@ the tool calls or the retries. Token counts never reach the rule or the verdict.
 ## Layout
     skills/replaceable/SKILL.md          the procedure the agent follows, the hard rules, the verdict table
     skills/replaceable/scripts/          prepare, run (= audit + replay + verdict), host_replay, selftest; fit, derive, thresholds, lean, stats
-    examples/                            a 600-run log and the three lines its run ends with
+    examples/                            ten logs with a known answer, each with the verdict it must end in; check.sh runs them all
     test/                                unit tests that need no Lean: bound, verdict table, rule scan, solver, typing, tokens
     sz.py                                the line budget (code lines by `tokenize`, gate in MAX_LINE_COUNT)
 
 ## Development
-    python3 -m unittest discover -s test && python3 skills/replaceable/scripts/selftest.py && python3 sz.py && ruff check .
+    python3 -m unittest discover -s test && python3 skills/replaceable/scripts/selftest.py && sh examples/check.sh && python3 sz.py && ruff check .
 
 Style: 2-space indentation, lines up to 150 characters, dense but not golfed, comments say why (`# NOTE:`), almost no docstrings. The line budget
 is a feature: every script should stay readable in one sitting. See `SECURITY.md` for what the scripts do and do not protect against.

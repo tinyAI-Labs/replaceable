@@ -58,3 +58,5 @@ jobs:
           curl -sSf https://elan.lean-lang.org/elan-init.sh | sh -s -- -y --default-toolchain "$(cat lean-toolchain)"
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - run: python skills/replaceable/scripts/selftest.py
+      - name: The examples end in the verdict their expected.txt names
+        run: sh examples/check.sh
