@@ -136,10 +136,11 @@ def fit_rule(rows: list[stats.Row], schema: stats.Schema, types_path: Path, rule
   report["rule_file"], report["rule_sha256"], report["declares_fallback"] = str(rule_path), stats.sha256(source), lean.has_fallback(source)
   check = lean.check_rule(types_src, source, stats.WORK_DIR)
   if not check.compiled: return {**report, "lean": {"compiled": False, "violations": list(check.violations)}}
-  run = lean.run_rule(types_src, source, schema, [r["typed_input"] for r in rows], stats.WORK_DIR)
+  seen = stats.sample(rows)  # a huge log would run into the Lean timeout
+  run = lean.run_rule(types_src, source, schema, [r["typed_input"] for r in seen], stats.WORK_DIR)
   if run.outputs is None: return {**report, "lean": {"compiled": True, "error": run.failure}}
-  report["lean"] = {"compiled": True, "early_agreement": round(sum(p == r["output"] for p, r in zip(run.outputs, rows)) / len(rows), 4)}
-  if run.fallback is not None: report["lean"]["fallback"] = stats.fallback_stats(rows, run.outputs, run.fallback)
+  report["lean"] = {"compiled": True, "early_agreement": round(sum(p == r["output"] for p, r in zip(run.outputs, seen)) / len(seen), 4)}
+  if run.fallback is not None: report["lean"]["fallback"] = stats.fallback_stats(seen, run.outputs, run.fallback)
   return report
 
 def next_step(state: dict[str, Any]) -> dict[str, str]:

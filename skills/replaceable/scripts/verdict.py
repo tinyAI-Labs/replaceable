@@ -56,6 +56,7 @@ def build(state: dict[str, Any], receipt: dict[str, Any] | None, rule_src: str |
   name, why = verdict_from_replay(receipt)
   verdict: dict[str, Any] = {"verdict": name, "exit_stage": "replay", "rationale": why}
   if ran: verdict.update({k: receipt[k] for k in ("n_heldout", "lower_bound", "agreement", "baseline")})
+  if ran and "sampled_from" in receipt: verdict["rationale"] += f" The replay used a fixed sample of {receipt['n_heldout']} of the {receipt['sampled_from']} held-back cases."
   fit, scan = state.get("fit", {}), state.get("conflicts", {})
   if name in SCOPED:
     if not scope and "scope_question" in state["triage"]:  # NOTE: a deterministic claim needs the scope, and it is the reader's call
