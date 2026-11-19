@@ -21,10 +21,18 @@ class TestPrepareTyping(unittest.TestCase):
     (field, column), = self.typed(["in-review", "2nd", None, "ok"])[0]
     self.assertEqual((field["values"], column), (["in_review", "missing", "ok", "v_2nd"], ["in_review", "v_2nd", "missing", "ok"]))
     self.assertEqual(field["labels"], {"v_2nd": "2nd", "in_review": "in-review", "missing": None})
+  def test_numbers_mixed_with_text_become_a_category(self):  # UCI Car: doors is 2, 3, 4 or "5more"
+    columns, _, problem = self.typed([2, 3, "5more", 4, 2, "5more"])
+    self.assertIsNone(problem)
+    (field, column), = columns
+    self.assertEqual(field["type"], "enum")
+    self.assertEqual([len(set(column)), column[0] == column[4], column[2] == column[5]], [4, True, True])
+    _, _, problem = self.typed([*range(30), "many"])  # still too many values to be a category
+    self.assertIn("distinct text values", problem)
   def test_untypable(self):
     self.assertIn("free text or an identifier", self.typed([f"id{i}" for i in range(21)])[2])
     self.assertIn("--drop", self.typed([{"nested": 1}])[2])
-    self.assertIn("--drop", self.typed([1, "one"])[2])
+    self.assertIn("--drop", self.typed([1, {"nested": 1}])[2])  # a number with nested data; a number with text is a category
   def test_names(self):
     namer = prepare.field_namer()
     names = [namer(raw) for raw in ("customer id", "def", "input", "Input", "derived1")]

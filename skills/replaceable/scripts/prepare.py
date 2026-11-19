@@ -77,7 +77,8 @@ def type_field(raw: str, values: list[Any], name: Callable[[str], str]) -> tuple
     present = [v for v in values if v is not None]
     field["unit"] = "calendar date as YYYYMMDD"
     notes.append(f"{label}: dates became numbers (2024-03-21 is 20240321); a time of day is dropped")
-  if present and all(isinstance(v, (bool, str)) for v in present) and len({type(v) for v in present}) == 1:
+  types = {type(v) for v in present}
+  if present and (len(types) == 1 and types <= {bool, str} or str in types and types <= {int, float, str}):  # 2, 3, "5more" is a category
     idents, to_id, labels = as_enum(values)
     if len(idents) > MAX_ENUM:
       return [], [], (f"input field {raw!r} has {len(idents)} distinct text values (more than {MAX_ENUM}): free text or an identifier. "
