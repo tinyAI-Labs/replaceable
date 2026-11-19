@@ -9,7 +9,7 @@ from stats import BOUND_CORE, BOUND_DETERMINISTIC, MIN_HELDOUT
 from replay import read_receipt
 from audit import AUDIT_COMMAND, AUDIT_FILE, REPLAY_COMMAND, RUN_COMMAND, VERDICT_COMMAND, weak_note
 
-SCOPED = ("DETERMINISTIC", "DETERMINISTIC_CORE_FALLBACK", "CONSTANT")
+SCOPED = ("DETERMINISTIC", "DETERMINISTIC_CORE_FALLBACK", "DETERMINISTIC_TINYAI", "CONSTANT")
 
 def verdict_from_replay(replay: dict[str, Any]) -> tuple[str, str]:
   # NOTE: (verdict, reason) for a replay report or receipt. L is the exact one-sided 95% lower bound on the held-out agreement. The rows
@@ -28,6 +28,9 @@ def verdict_from_replay(replay: dict[str, Any]) -> tuple[str, str]:
     return "DETERMINISTIC_CORE_FALLBACK", (
       f"{seen}; outside the declared fallback region it matched {fb['outside'] - fb['misses_outside']} of {fb['outside']} "
       f"(95% lower bound {fb['outside_lower_bound']}), and {fb['inside']} held-back cases fall inside the region.")
+  model = replay.get("model")  # NOTE: last of the passing rows: the model turns an INCONCLUSIVE into a verdict, never one verdict into another
+  if model and model["lower_bound"] >= BOUND_DETERMINISTIC and stats.beats_baseline(model["lower_bound"], model["baseline"]):
+    return "DETERMINISTIC_TINYAI", f"{seen}: no readable rule reaches {BOUND_DETERMINISTIC}. {model['why']}"
   if low >= BOUND_CORE:
     why = "no fallback region was declared" if not fb else (
       f"the fallback region does not contain the misses ({fb['misses_outside']} misses in the {fb['outside']} cases outside it, "
@@ -128,7 +131,8 @@ def conclude(scope: str | None = None, note: str | None = None) -> int:
   stats.show("WHY: " + result["rationale"])
   print(f"TOKENS: {result['tokens'].get('arithmetic', 'unknown')}" + (f" ({result['tokens']['note']})" if "note" in result["tokens"] else ""))
   print("NEXT: nothing to run; verdict.json is written. Report it as it is." + (
-    " A person confirms that Rule.lean matches the written policy before it replaces the loop." if "scope" in result else ""))
+    " A person confirms that Rule.lean matches the written policy before it replaces the loop."
+    if "scope" in result and result["verdict"] != "DETERMINISTIC_TINYAI" else ""))
   return 0
 
 if __name__ == "__main__":

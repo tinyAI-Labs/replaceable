@@ -5,6 +5,8 @@ import argparse, json, sys
 from pathlib import Path
 from typing import Any, Sequence
 import lean, stats
+try: from tinyai import exam as witness  # optional: without the tinyai/ folder the skill is the rule-only skill
+except ImportError: witness = None
 
 RECEIPT_RESULT = ("rule_sha256", "n_heldout", "n_match", "agreement", "lower_bound", "baseline", "all_outputs_constant")
 USED = {"error": "replay already used: the first result stands"}
@@ -22,6 +24,7 @@ def replay_report(types_src: str, rule_src: str, schema: stats.Schema, early: Se
             "baseline": round(base, 4), "baseline_class": base_cls, "all_outputs_constant": constant,
             "counterexamples": stats.misses(held, run.outputs, 3)}
   if n < len(heldout): report["sampled_from"] = len(heldout)
+  if witness and (model := witness.exam(schema, early, held)): report["model"] = model  # NOTE: numbers only; the model is gone when this returns
   if run.fallback is not None: report["fallback"] = stats.fallback_stats(held, run.outputs, run.fallback)
   if stats.token_stats(heldout)["with_tokens"]: report["tokens"] = stats.token_stats(heldout)  # NOTE: aggregates only, like everything in the receipt
   return report
