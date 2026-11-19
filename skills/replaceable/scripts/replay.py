@@ -12,15 +12,17 @@ USED = {"error": "replay already used: the first result stands"}
 def replay_report(types_src: str, rule_src: str, schema: stats.Schema, early: Sequence[stats.Row], heldout: Sequence[stats.Row], workdir: Path,
                   **lean_args: Any) -> dict[str, Any]:
   # agreement of `f` with the held-out outputs: counts, 95% lower bound, baseline, fallback containment; {"failure": code} if it did not run
-  run = lean.run_rule(types_src, rule_src, schema, [r["typed_input"] for r in heldout], workdir, **lean_args)
+  held = stats.sample(heldout)  # a huge held-back half is replayed as a fixed sample; the bound below counts the cases actually replayed
+  run = lean.run_rule(types_src, rule_src, schema, [r["typed_input"] for r in held], workdir, **lean_args)
   if run.outputs is None: return {"failure": run.failure}
-  n, k, held_outputs = len(heldout), sum(p == r["output"] for p, r in zip(run.outputs, heldout)), [r["output"] for r in heldout]
-  constant = len({r["output"] for r in early} | set(held_outputs)) == 1
+  n, k, held_outputs = len(held), sum(p == r["output"] for p, r in zip(run.outputs, held)), [r["output"] for r in held]
+  constant = len({r["output"] for r in early} | {r["output"] for r in heldout}) == 1
   base_cls, base = stats.baseline(held_outputs, schema["output"]["values"])
   report = {"n_heldout": n, "n_match": k, "agreement": round(k / n, 4), "lower_bound": round(stats.clopper_pearson_lower(k, n), 4),
             "baseline": round(base, 4), "baseline_class": base_cls, "all_outputs_constant": constant,
-            "counterexamples": stats.misses(heldout, run.outputs, 3)}
-  if run.fallback is not None: report["fallback"] = stats.fallback_stats(heldout, run.outputs, run.fallback)
+            "counterexamples": stats.misses(held, run.outputs, 3)}
+  if n < len(heldout): report["sampled_from"] = len(heldout)
+  if run.fallback is not None: report["fallback"] = stats.fallback_stats(held, run.outputs, run.fallback)
   if stats.token_stats(heldout)["with_tokens"]: report["tokens"] = stats.token_stats(heldout)  # NOTE: aggregates only, like everything in the receipt
   return report
 

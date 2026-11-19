@@ -31,6 +31,19 @@ class TestConflicts(unittest.TestCase):
     scan = stats.conflict_scan(rows([(1, "a"), (1, "b")] + [(i, "a") for i in range(2, 10)]), ["x"], ["a", "b"])
     self.assertEqual((scan["conflict_rate"], scan["repeat_share"], scan["conflicted_groups"]), (0.5, 0.2, 1))
 
+class TestSample(unittest.TestCase):  # one Lean run takes a bounded number of cases, whatever the log size
+  def test_small_logs_are_whole(self):
+    few = rows([(i, "a") for i in range(100)])
+    self.assertEqual(stats.sample(few, 100), few)
+  def test_big_logs_are_cut_to_the_cap_by_case_id_alone(self):
+    big = rows([(i, "a" if i % 2 else "b") for i in range(10_000)])
+    kept = stats.sample(big, 1000)
+    self.assertEqual(len(kept), 1000)
+    self.assertEqual(kept, stats.sample(big, 1000))  # the same cases every time
+    flipped = [{**r, "output": "c"} for r in big]  # outputs and inputs play no part in the choice
+    self.assertEqual([r["case_id"] for r in kept], [r["case_id"] for r in stats.sample(flipped, 1000)])
+    self.assertNotEqual([r["case_id"] for r in kept[:50]], [r["case_id"] for r in big[:50]])  # not simply the oldest cases
+
 class TestTokens(unittest.TestCase):
   def test_row_tokens(self):
     for line, want in (({"tokens": 12}, 12), ({"usage": {"input_tokens": 10, "output_tokens": 5}}, 15), ({"input_tokens": 1, "output_tokens": 5}, 6),

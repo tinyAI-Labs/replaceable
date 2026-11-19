@@ -1,6 +1,6 @@
 # statistics, the thresholds of the procedure and the small file helpers every script shares (standard library only)
 from __future__ import annotations
-import hashlib, json, os, sys
+import hashlib, json, os, sys, zlib
 from collections import Counter
 from math import ceil, exp, lgamma, log, log1p
 from pathlib import Path
@@ -22,6 +22,7 @@ MIN_TOTAL = 150  # logged cases needed before anything is tested
 MIN_HELDOUT = 60  # held-back cases needed for a replay verdict (and outside a fallback region)
 CONFLICT_THRESHOLD = 0.05  # share of the repeated-input cases that disagree with the majority of their identical-input group
 MIN_CONFLICT_GROUPS = 2  # distinct inputs that must show a conflict before the loop is called PROBABILISTIC
+MAX_LEAN_CASES = 50_000  # one Lean run takes about this many cases; more runs into its timeout
 MIN_REPEAT_SHARE = 0.2  # below this almost every input is unique and the conflict scan cannot see anything
 BOUND_DETERMINISTIC = 0.95  # 95% lower bound on held-out agreement for DETERMINISTIC and CONSTANT
 BOUND_CORE = 0.80  # ... for DETERMINISTIC_CORE_FALLBACK
@@ -33,6 +34,12 @@ def read_schema(path) -> Schema: return json.loads(Path(path).read_text(encoding
 def decision_fields(schema: Schema) -> list[str]: return [f["name"] for f in schema["input"] if f.get("role", "decision") == "decision"]
 # tie-break order for majority outputs: the schema's values, else the sorted observed outputs
 def output_order(schema: Schema, rows: Sequence[Row]) -> list[str]: return list(schema["output"]["values"]) or sorted({r["output"] for r in rows})
+
+def sample(rows: Sequence[Row], cap: int = MAX_LEAN_CASES) -> list[Row]:
+  # exactly `cap` cases, those with the smallest hash of the case id (so never chosen by position, input or output); a short log stays whole
+  if len(rows) <= cap: return list(rows)
+  keep = set(sorted(range(len(rows)), key=lambda i: zlib.crc32(rows[i]["case_id"].encode()))[:cap])
+  return [r for i, r in enumerate(rows) if i in keep]
 
 def read_json(path) -> dict[str, Any]:
   try: found = json.loads(Path(path).read_text(encoding="utf-8"))
