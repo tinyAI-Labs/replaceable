@@ -1,5 +1,5 @@
 # how a raw log is typed: numbers, dates, enums, names, and what must stop the run
-import sys, unittest
+import subprocess, sys, tempfile, unittest
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "skills" / "replaceable" / "scripts"))
 import prepare
@@ -46,3 +46,16 @@ class TestPrepareTyping(unittest.TestCase):
     self.assertEqual(prepare.infer(free_text, set())[0]["output"]["values"], [])
 
 if __name__ == "__main__": unittest.main()
+
+class TestPrepareInput(unittest.TestCase):  # a log that is not JSON lines must be told so, not crash
+  def run_on(self, text):
+    with tempfile.TemporaryDirectory() as tmp:
+      (Path(tmp) / "raw.txt").write_text(text, encoding="utf-8")
+      done = subprocess.run([sys.executable, str(Path(prepare.__file__)), "raw.txt"], cwd=tmp, capture_output=True, text=True, check=False)
+    return done.returncode, done.stdout + done.stderr
+  def test_csv_and_json_array_are_told_to_convert(self):
+    for text in ("amount,tier,output\n10,gold,approve\n", '[{"typed_input": {"amount": 10}, "output": "approve"}]'):
+      code, said = self.run_on(text)
+      self.assertEqual(code, 1)
+      self.assertNotIn("Traceback", said)
+      self.assertIn("converted first", said)
