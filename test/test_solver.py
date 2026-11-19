@@ -19,6 +19,16 @@ class TestFit(unittest.TestCase):
     report, lean = fit.fit_report(rows(make), schema(*fields))
     self.assertEqual((report["early_agreement"], report["leaves"], report["residual"]), (1.0, 4, []))
     for part in ("x.amount <= 5000", "x.amount <= 1000", "x.tier = Tier.gold"): self.assertIn(part, lean)
+  def test_dates_are_not_compared_as_ratios(self):  # 20271231 / 20280101 is not a day: a ratio of two YYYYMMDD numbers is not calendar arithmetic
+    start = datetime.date(2026, 1, 1)
+    def make(rng):
+      asked = start + datetime.timedelta(days=rng.randrange(700))
+      expires = asked + datetime.timedelta(days=rng.randrange(5, 60))
+      day = {"asked": int(asked.strftime("%Y%m%d")), "expires": int(expires.strftime("%Y%m%d"))}
+      return day, "approve" if (expires - asked).days <= 30 else "deny"
+    when = {"type": "nat", "unit": "calendar date as YYYYMMDD"}
+    report, lean = fit.fit_report(rows(make, 2000), schema({"name": "asked", **when}, {"name": "expires", **when}))
+    self.assertFalse([line for line in lean.splitlines() if "asked" in line and "expires" in line], lean)
   def test_noise_is_not_memorised(self):
     coin = rows(lambda rng: ({"n": rng.randrange(1000)}, rng.choice(["approve", "deny"])))
     report, _ = fit.fit_report(coin, schema({"name": "n", "type": "nat"}))
