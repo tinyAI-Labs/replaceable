@@ -57,46 +57,37 @@ class TestTokens(unittest.TestCase):
                      {"cases": 11, "with_tokens": 10, "total": 55, "mean": 5.5, "median": 5.5, "p90": 9})
     self.assertEqual(stats.token_stats([{}, {}]), {"cases": 2, "with_tokens": 0})
 
-class TestConvergedFrom(unittest.TestCase):  # where a self-optimizing loop settles: how many runs were its learning phase
+class TestSteadyFrom(unittest.TestCase):  # where a loop's feedback becomes steady: the tail after its latest change
   ramp = [i % 5 >= 2 for i in range(300)]  # 60% right while it learns
-  def test_a_loop_that_learns_and_holds_has_its_learning_phase_cut_off(self):
-    self.assertEqual(stats.converged_from(self.ramp + [True] * 700), 300)
-    self.assertEqual(stats.converged_from([True] * 300 + [False] * 100 + [True] * 500), 400)  # a later dip moves the start behind it
-  def test_the_runs_before_the_first_full_block_are_checked_too(self):
-    self.assertEqual(stats.converged_from([False] * 99 + [True] * 1000), 99)  # 1099 runs: the odd 99 at the front are not waved through
-  def test_a_loop_that_was_always_good_has_no_learning_phase(self):
-    self.assertEqual(stats.converged_from([True] * 500), 0)
-  def test_the_tail_as_a_whole_is_at_least_95_percent(self):
-    log = self.ramp + [i % 25 < 23 for i in range(2000)] + [True] * 1000  # 92% for a long stretch, then clean: blocks at 92% pass the floor
-    start = stats.converged_from(log)
-    self.assertGreater(start, 300)
-    self.assertGreaterEqual(sum(log[start:]) / len(log[start:]), 0.95)
-  def test_no_tail_no_convergence(self):
-    self.assertIsNone(stats.converged_from([i % 5 != 0 for i in range(3000)]))  # 80% and flat: it never reaches 95%
-    self.assertIsNone(stats.converged_from([True] * 100))  # too short to tell
-    self.assertIsNone(stats.converged_from([False] * 500 + [True] * 120))  # settled too recently: fewer than 150 clean runs
-    self.assertIsNone(stats.converged_from([True] * 3000 + [False] * 60))  # it regressed at the end: the last block does not hold
-  def test_a_long_spell_below_95_percent_is_not_folded_into_the_tail(self):
-    start = stats.converged_from([i % 25 < 23 for i in range(4000)] + [True] * 3000)  # 92% for 4000 runs, then clean: together above 95%
-    self.assertGreaterEqual(start, 3600)
+  def test_a_loop_that_learns_and_holds_is_cut_after_its_learning_phase(self):
+    log = self.ramp + [True] * 700
+    start = stats.steady_from(log)
+    self.assertTrue(300 <= start <= 600, start)  # it may give up a few clean runs after the change, never keep an old one
+    self.assertTrue(all(log[start:]))
+  def test_a_loop_that_never_changed_is_steady_from_the_start(self):
+    self.assertEqual(stats.steady_from([True] * 500), 0)
+    self.assertEqual(stats.steady_from([i % 5 != 0 for i in range(2000)]), 0)  # 80% throughout
+  def test_a_fix_in_the_last_runs_of_a_long_log_is_seen(self):
+    log = [i % 25 < 23 for i in range(5750)] + [True] * 250  # 92% for 5750 runs, then 250 clean ones
+    start = stats.steady_from(log)
+    self.assertTrue(5750 <= start <= 5900, start)
+  def test_a_dip_at_the_end_leaves_only_the_dip(self):
+    self.assertGreaterEqual(stats.steady_from([True] * 3000 + [False] * 60), 2900)
+  def test_noise_alone_rarely_looks_like_a_change(self):
+    rng = random.Random(7)  # 200 flat loops at 81%
+    changed = sum(stats.steady_from([rng.random() < 0.81 for _ in range(3000)]) > 0 for _ in range(200))
+    self.assertLess(changed, 20)
 
-class TestUnsettled(unittest.TestCase):  # a loop that does not hold 95%: moving (nothing to test yet) or flat (examined as it is)
-  def test_a_flat_loop_is_not_moving(self):
-    self.assertIsNone(stats.unsettled([i % 5 != 0 for i in range(2000)]))  # 80% throughout
-    rng = random.Random(7)  # noise alone must rarely look like movement: 200 flat loops at 81%
-    moved = sum(stats.unsettled([rng.random() < 0.81 for _ in range(3000)]) is not None for _ in range(200))
-    self.assertLess(moved, 12)
-  def test_a_slow_steady_rise_is_moving_though_the_last_two_quarters_differ_by_two_points(self):
-    quarters = [[False] * wrong + [True] * (750 - wrong) for wrong in (129, 101, 83, 67)]  # 82.8%, 86.5%, 88.9%, 91.1%
-    self.assertIsNotNone(stats.unsettled([run for quarter in quarters for run in quarter]))
-  def test_a_log_too_short_for_quarters_has_nothing_to_say(self):
-    self.assertIsNone(stats.unsettled([True, False, True]))
-  def test_a_rising_loop_a_falling_one_and_one_back_at_95_are_moving(self):
-    rising = [i % 5 >= 2 for i in range(750)] + [i % 10 != 0 for i in range(250)]  # 60% then 90%
-    self.assertEqual(stats.unsettled(rising), (0.9, 0.6))
-    self.assertEqual(stats.unsettled([True] * 1000 + [i % 5 >= 2 for i in range(500)])[0], 0.6)  # it fell off
-    dip = [True] * 5000 + [False] * 40 + [True] * 80  # one bad block at the end of a long good run: the quarter is at 97%, the tail did not hold
-    self.assertGreaterEqual(stats.unsettled(dip)[0], 0.95)
+class TestDrifting(unittest.TestCase):  # a slow slope inside a steady stretch
+  def test_a_slow_steady_rise_is_a_drift(self):
+    log = [(j * 7919) % 750 >= wrong for wrong in (129, 101, 83, 67) for j in range(750)]  # 82.8%, 86.5%, 88.9%, 91.1%, wrong runs scattered
+    self.assertEqual(stats.steady_from(log), 0)  # no step for the scan to find
+    first, last = stats.drifting(log)
+    self.assertLess(first, 0.86)
+    self.assertGreater(last, 0.89)
+  def test_a_flat_loop_and_a_short_log_do_not_drift(self):
+    self.assertIsNone(stats.drifting([i % 5 != 0 for i in range(3000)]))
+    self.assertIsNone(stats.drifting([True] * 100 + [False] * 40))  # too short to split in thirds of 50
 
 class TestRunsPerDay(unittest.TestCase):  # the pace a token count is extrapolated at: only real timestamps say how long the log took
   def rows(self, *ts): return [{"case_id": f"c{i}", "ts": t} for i, t in enumerate(ts)]

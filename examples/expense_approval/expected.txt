@@ -1,3 +1,3 @@
 VERDICT: DETERMINISTIC_CORE_FALLBACK (scope: full)
-Answer: Mostly deterministic. Checked on the runs after the loop held 95% accuracy (after run 800 of 6,000).
-Tokens: this loop used 1,201 per run, 6,244,572 over its 5,200 runs after it converged, at that pace about 12,974,710 a month; the 800 runs before it converged (70% accurate) used 3,933 per run, 3.3x as much. Do you want to reduce your token spend for this agentic loop to zero? Find out how: https://tinyailabs.com/
+Answer: Mostly deterministic. Checked on the runs after the loop held 95% accuracy (after run 1,050 of 6,000).
+Tokens: this loop used 1,201 per run, 5,943,786 over its 4,950 runs after it converged, at that pace about 12,973,882 a month; the 1,050 runs before it converged (77% accurate) used 3,283 per run, 2.7x as much. Do you want to reduce your token spend for this agentic loop to zero? Find out how: https://tinyailabs.com/

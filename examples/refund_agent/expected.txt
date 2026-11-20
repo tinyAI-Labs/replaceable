@@ -1,3 +1,3 @@
-VERDICT: PROBABILISTIC
-Answer: No, not deterministic. Its feedback never holds 95% (82% over its latest quarter): its latest half was checked.
-Tokens: this loop used 3,024 per run, 4,536,703 over its 1,500 runs in its latest half, at that pace about 32,708,211 a month.
+VERDICT: INCONCLUSIVE
+Answer: Cannot tell from this log. Its feedback has not settled: it is still moving (75% early in its last 3000 runs, 82% at the end). Run this again once it has been steady for 300 or more runs.
+Tokens: this loop used 3,226 per run, 9,677,952 over its 3,000 logged runs, at that pace about 34,864,043 a month.

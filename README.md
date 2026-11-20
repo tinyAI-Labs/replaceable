@@ -50,10 +50,10 @@ override, a check) until it is right at least 95% of the time, or does not get t
 | `ticket_triage` | routes support tickets to a queue; one routing note per category, learned from corrections; enterprise urgent tickets escalate | DETERMINISTIC, once it has converged |
 | `expense_approval` | approves or escalates by a limit for each department, learned from reviewer overrides; a person decides the big amounts case by case | DETERMINISTIC_CORE_FALLBACK |
 | `pr_labeler` | labels pull requests small, medium or large with its own limits for each area and author type: too many branches to read, a learned model reproduces it | DETERMINISTIC_LEARNED |
-| `refund_agent` | improves but plateaus near 80%: the same inputs still get different answers | PROBABILISTIC (it never settles at 95%) |
+| `refund_agent` | improves but plateaus near 80%: the same inputs still get different answers | PROBABILISTIC (it settles near 80%) |
 | `lead_router_memory` | reaches 95%, but enterprise leads go to the two reps in a rotation the loop keeps in its notes and the log does not carry | INCONCLUSIVE (hidden state) |
 
-The answer says after which run the loop held 95% (or that its feedback never does, or has not settled), and the `Tokens:` line says what the runs before that cost compared with the converged loop.
+The answer says after which run the loop held 95% (or that its feedback holds below 95%, or has not settled), and the `Tokens:` line says what the runs before that cost compared with the converged loop.
 Something to try: delete the `correct` field from every line of `ticket_triage`: the exam then runs on the whole log, the learning phase is mixed in,
 and the same inputs now got different answers at different times: it comes out PROBABILISTIC.
 
@@ -77,8 +77,9 @@ was made from, and the decision. From a trace or message-list export, roughly:
 - At least 150 runs (after the learning phase, if the log has one); a policy with many branches needs about 1000 or more before a rule can pass, and about 2000 for the learned check.
 - `correct` is the loop's own feedback on a run: a human override, a test, an eval score turned into pass or fail, as tracing tools record it. With it on
   every line, the skill sets aside the runs before the loop held 95% (its learning phase), examines the rest, and reports what the learning phase cost
-  per run against the converged loop. A loop whose feedback is still moving (rising, or at 95% for fewer than 150 runs) is `INCONCLUSIVE`: it has no fixed
-  policy yet. One that stays flat below 95% is examined on its latest half. Without `correct`, the whole log is examined, and a loop that is still
+  per run against the converged loop. A loop whose feedback changed recently (a step in the last 300 runs, or a slope across the log) is `INCONCLUSIVE`: it
+  has no fixed policy yet. One that holds steady below 95% is examined from where it became steady. A change in its last ~100 runs is too recent to see.
+  `correct` cannot catch a policy that drifts while its feedback stays true. Without `correct`, the whole log is examined, and a loop that is still
   learning looks like one that drifted or guesses (`PROBABILISTIC`, or `INCONCLUSIVE`). Under 150 runs `correct` is ignored.
 
 ## Tokens and savings

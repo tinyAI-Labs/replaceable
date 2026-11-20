@@ -129,8 +129,8 @@ class TestReport(unittest.TestCase):  # the owner reads the answer and the token
     always = {**plain, "learning": {"converged": True, "runs": 600}}  # right from the start: nothing was set aside
     self.assertEqual(verdict.answer_line(always), "Answer: Yes, deterministic.")
     never = {"verdict": "PROBABILISTIC", "learning": {"converged": False, "runs": 900, "accuracy": 0.76, "examined_from": 450}}
-    self.assertEqual(verdict.answer_line(never), "Answer: No, not deterministic. Its feedback never holds 95% (76% over its latest quarter): "
-                     "its latest half was checked.")
+    self.assertEqual(verdict.answer_line(never),
+                     "Answer: No, not deterministic. Its feedback holds at 76%, below 95%: its steady stretch was checked.")
   def test_the_learning_phase_is_priced_against_the_converged_loop(self):
     spend = {"known": True, "per_run": 1000.0, "logged": 300_000, "cases_with_tokens": 300,
              "learning": {"from_run": 1300, "accuracy_before": 0.85, "tokens": {"with_tokens": 1300, "mean": 2500.0}}}
@@ -147,13 +147,16 @@ class TestReport(unittest.TestCase):  # the owner reads the answer and the token
     self.assertEqual(block["learning"]["from_run"], 40)
     self.assertIn("the 40 runs before it converged (70% accurate) used 300 per run, 3.0x as much", verdict.tokens_line(block))
   def test_a_moving_loop_is_inconclusive_whatever_the_exam_says(self):
-    ruled = {"triage": {"scope": "full"}, "fit": {"rule_sha256": stats.sha256("rule")}, "learning": {"unsettled": {"recent": 0.92, "before": 0.86}}}
+    unsettled = {"recent": 0.92, "before": 0.86, "runs": 200}
+    ruled = {"triage": {"scope": "full"}, "fit": {"rule_sha256": stats.sha256("rule")}, "learning": {"unsettled": unsettled}}
     said = verdict.build(ruled, {"rule_sha256": stats.sha256("rule"), **report()}, "rule", None)
     self.assertEqual((said["verdict"], said["exit_stage"]), ("INCONCLUSIVE", "feedback"))
-    self.assertIn("92% right over its latest quarter, 86% over the two before", said["rationale"])
-    moving = {"verdict": "INCONCLUSIVE", "learning": {"converged": False, "runs": 900, "unsettled": {"recent": 0.92, "before": 0.86}}}
-    self.assertEqual(verdict.answer_line(moving), "Answer: Cannot tell from this log. Its feedback has not settled: "
-                     "92% right over its latest quarter, 86% over the two before. Run this again once it has held 95% for 150 runs.")
+    self.assertIn("it changed 200 runs before the end of the log (92% right since, 86% before)", said["rationale"])
+    moving = {"verdict": "INCONCLUSIVE", "learning": {"converged": False, "runs": 900, "unsettled": unsettled}}
+    self.assertEqual(verdict.answer_line(moving), "Answer: Cannot tell from this log. Its feedback has not settled: it changed 200 runs before "
+                     "the end of the log (92% right since, 86% before). Run this again once it has been steady for 300 or more runs.")
+  def test_a_figure_below_the_bar_is_never_rounded_up_to_it(self):
+    self.assertEqual((verdict.pct(0.949), verdict.pct(0.95), verdict.pct(1.0)), ("94%", "95%", "100%"))
   def test_after_max_rows_the_report_says_only_the_latest_runs_were_examined(self):
     trimmed = {"converged": True, "runs": 6000, "from_run": 1300, "trimmed": True}
     self.assertTrue(verdict.answer_line({"verdict": "DETERMINISTIC", "learning": trimmed}).endswith(" (--max-rows: only its latest runs.)"))
@@ -164,7 +167,7 @@ class TestReport(unittest.TestCase):  # the owner reads the answer and the token
     self.assertTrue(block["learning"]["trimmed"])
     self.assertIn("over its 1,000 latest runs", verdict.tokens_line(block))
   def test_a_moving_loop_does_not_hide_that_the_output_is_free_text(self):
-    moving = {"unsettled": {"recent": 0.9, "before": 0.7}}
+    moving = {"unsettled": {"recent": 0.9, "before": 0.7, "runs": 200}}
     exits = lambda name: {"triage": {"scope": "full"}, "proposed": {"verdict": name, "exit_stage": "x", "why": "w"},  # noqa: E731
                           "conflicts": {"example_pairs": []}, "learning": moving}
     self.assertEqual(verdict.build(exits("OUT_OF_SCOPE"), None, None, None)["verdict"], "OUT_OF_SCOPE")

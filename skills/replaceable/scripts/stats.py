@@ -104,37 +104,30 @@ def token_stats(rows: Sequence[Row]) -> dict[str, Any]:
   return {"cases": len(rows), "with_tokens": len(counts), "total": sum(counts), "mean": round(sum(counts) / len(counts), 1),
           "median": median(counts), "p90": counts[ceil(0.9 * len(counts)) - 1]}
 
-PLATEAU, WINDOW, MIN_TAIL = 0.95, 100, 150  # a loop has converged when it holds at least 95% over a stretch of at least 150 runs
+PLATEAU, MIN_TAIL, SPAN, STEP = 0.95, 150, 300, 50  # holding 95% takes 150+ runs; a change is looked for at every 50th run, over 300-run stretches
 
-def converged_from(correct: Sequence[bool]) -> int | None:
-  # the number of runs before the loop settled (the learning phase), or None if it never holds 95% over MIN_TAIL runs. The plateau is the accuracy of
-  # the last quarter of the log and must reach PLATEAU; the tail reaches back over every earlier block of WINDOW runs within four standard errors of a
-  # 95% loop (8.7 points) of it, and then gives up its oldest blocks until the tail as a whole is at least PLATEAU
+def steady_from(correct: Sequence[bool]) -> int:
+  # the run from which the loop's feedback is steady: the start of the stretch after its latest change. At every STEP-th run from the end (100+ runs
+  # must follow it) the stretch of up to SPAN runs after the run is compared with the equal stretch before it; a change is a difference of at least
+  # 2 points and 3.5 standard errors. The scan starts at the end, so the tail never holds the old policy; it may give up some runs after the change
   n = len(correct)
-  last = max(MIN_TAIL, n // 4)
-  plateau = sum(correct[-last:]) / last if n >= MIN_TAIL else 0.0
-  if plateau < PLATEAU: return None
-  floor, start = plateau - 4 * sqrt(PLATEAU * (1 - PLATEAU) / WINDOW), n
-  while start and sum(correct[max(0, start - WINDOW):start]) >= floor * (start - max(0, start - WINDOW)): start = max(0, start - WINDOW)
-  holds = lambda part: sum(part) >= PLATEAU * len(part)  # noqa: E731
-  while n - start >= MIN_TAIL and not (holds(correct[start:]) and holds(correct[start:start + 3 * WINDOW])):
-    start += WINDOW  # the whole tail, and its oldest stretch, hold 95%: a long spell below it is not folded in by what comes after
-  return start if n - start >= MIN_TAIL else None
+  total = [0]
+  for ok in correct: total.append(total[-1] + ok)
+  for t in range(n - 100, 99, -STEP):
+    m = min(SPAN, n - t, t)
+    after, before = total[t + m] - total[t], total[t] - total[t - m]
+    pooled = (after + before + 1) / (2 * m + 2)
+    if abs(after - before) / m >= max(0.02, 3.5 * sqrt(pooled * (1 - pooled) * 2 / m)): return t
+  return 0
 
-def unsettled(correct: Sequence[bool]) -> tuple[float, float] | None:
-  # for a loop that does not hold 95%: (latest quarter, the two quarters before it) if its feedback is still moving, None if it is flat. Moving: the
-  # latest quarter is at 95% (a spell too recent to count), or it differs from the quarter two back, or from the two before it, by at least 2 points
-  # and by more than 2.5 standard errors of that difference (the first quarter is left out: a loop learns most of its policy early, then goes flat).
-  # A moving loop has no policy to test yet; a flat one is examined as it is
-  quarter = len(correct) // 4
-  if quarter == 0: return None
-  share = lambda part: sum(part) / len(part)  # noqa: E731
-  recent, two_back, between = (share(correct[-k * quarter:][:quarter]) for k in (1, 3, 2))
-  before = (two_back + between) / 2
-  def moved(other, weight):  # weight: how many quarters `other` spans, for the standard error of the difference
-    pooled = (recent + weight * other) / (1 + weight)
-    return abs(recent - other) >= max(0.02, 2.5 * sqrt(pooled * (1 - pooled) * (1 + 1 / weight) / quarter))
-  return (recent, before) if recent >= PLATEAU or moved(two_back, 1) or moved(before, 2) else None
+def drifting(correct: Sequence[bool]) -> tuple[float, float] | None:
+  # (the first third's accuracy, the last third's) if the feedback in a steady stretch still climbs or sinks across it, else None: the scan above
+  # finds steps, this finds a slow slope. Same bar as a change: 2 points and 3.5 standard errors
+  third = len(correct) // 3
+  if third < 50: return None
+  first, last = sum(correct[:third]), sum(correct[-third:])
+  pooled = (first + last + 1) / (2 * third + 2)
+  return (first / third, last / third) if abs(first - last) / third >= max(0.02, 3.5 * sqrt(pooled * (1 - pooled) * 2 / third)) else None
 
 def runs_per_day(rows: Sequence[Row]) -> float | None:
   # the pace a token count is extrapolated at; None unless `ts` are ISO timestamps that span a day (a counter, or no ts, says nothing about time)
