@@ -1,6 +1,6 @@
 # the whole procedure in one command: the audit of the early half, the one-shot held-out replay, the verdict
 # usage: python3 scripts/run.py [--scope full|decision_step_only] [--derive "x.account_no % 10"]... [--note "..."] [--why] [--usd-per-mtok P]
-# NOTE: it runs every step itself and ends with the `Answer:` and `Tokens:` lines; `--why` adds the audit, the replay report and the
+# NOTE: it runs every step itself and ends with the `Loop:`, `Answer:` and `Tokens:` lines; `--why` adds the audit, the replay report and the
 # `VERDICT:`, `WHY:` and `TOKENS:` lines before them. A weak rule is not a question: it takes the exam as it is and ends
 # INCONCLUSIVE. Before the verdict it stops only where it cannot go on alone, with the exact command to continue (NEXT) and the reason
 # (WHY): the scope is undeclared; a --derive expression is not valid Lean; or the host

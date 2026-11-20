@@ -2,24 +2,21 @@
 # NOTE: the tests are what any typed schema offers: an enum equals a value / is one of a group, a bool is true, a number is at most a
 # threshold, the ratio of two numbers is at most a threshold (`a * D <= N * b`). Other quantities reach it as extra number fields marked
 # `derived` (derive.py), compared with thresholds only. The tree is capped at MAX_LEAVES and pruned by description length, so it cannot
-# memorise cases. Leaves that still mix outputs are the residual; if they cover a minority of the cases they become the proposed
-# `fallback` region, widened by a safety margin. It never reads the held-out half: every number here describes the early half only.
+# memorise cases. Leaves that still mix outputs are the residual. It never reads the held-out half: every number here describes the early half only.
 from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 from fractions import Fraction
 from math import inf, log2
 from typing import Any, NamedTuple, Sequence
-from lean import MAX_RULE_BYTES, pascal
-from stats import BOUND_DETERMINISTIC, Row, Schema, decision_fields, output_order
+from lean import pascal
+from stats import Row, Schema, decision_fields, output_order
 from thresholds import pick_threshold, strict
 
 MAX_LEAVES = 16  # size cap of the rule, so that a person can read and sign it off
 GROW_LEAVES = 4 * MAX_LEAVES  # the search grows this far before pruning back
 RISING = 0.02  # gain in cross-validated agreement from doubling the cases that counts as "still rising"
 MAX_PAIR_FIELDS = 6  # numbers considered for ratio tests (the most informative ones)
-FALLBACK_MAX_COVER = 0.5  # residual leaves covering more than this share are "spread", not a region
-FALLBACK_MARGIN = 2  # neighbouring early cases a fallback bound is widened by
 CV_FOLDS = 5
 NUMERIC = ("le", "ratio")
 EPS = 1e-9  # a gain must beat the best so far by this much, so ties go to the test tried first
@@ -45,12 +42,8 @@ class Test(NamedTuple):
     num, den = _parts(self, x)
     return num * self.thr.denominator <= self.thr.numerator * den
 
-  def lean(self, branch: int = 0) -> str:
-    # the condition for taking `branch`, as a Lean proposition (ASCII operators, so any terminal can print it)
-    if self.kind == "switch": return f"x.{self.a} = {pascal(self.a)}.{self.values[branch]}"
-    return self._lean_yes() if branch == 0 else f"Not ({self._lean_yes()})"
-
-  def _lean_yes(self) -> str:
+  def lean(self) -> str:
+    # the condition of a two-way test, as a Lean proposition (ASCII operators, so any terminal can print it)
     n, d = self.thr.numerator, self.thr.denominator
     if self.kind == "is": return f"x.{self.a} = {pascal(self.a)}.{self.value}"
     if self.kind == "in": return f"([{', '.join('.' + v for v in self.values)}] : List {pascal(self.a)}).contains x.{self.a} = true"
@@ -68,7 +61,7 @@ class Test(NamedTuple):
     if self.kind != "ratio" and strict(self.thr.numerator): return f"{left} {'<' if yes else '>='} {self.thr + 1}"
     return f"{left} {'<=' if yes else '>'} {self.thr}"
 
-Conds = Sequence[tuple[Test, int]]  # (test, branch) steps: the path from the root to a node, or one alternative of a fallback region
+Conds = Sequence[tuple[Test, int]]  # (test, branch) steps: the path from the root to a node
 
 # numerator and denominator of a numeric test's value
 def _parts(test: Test, x: dict[str, Any]) -> tuple[int, int]: return (x[test.a], x[test.b]) if test.kind == "ratio" else (x[test.a], 1)
@@ -238,30 +231,40 @@ class Fitter:
       weakest.test, weakest.kids = None, ()
     return self._prune(root), root
 
-  def _widen(self, path: Conds) -> list[tuple[Test, int]]:
-    # NOTE: a residual leaf's conditions with each numeric bound moved outward past FALLBACK_MARGIN neighbouring cases: the edge of a
-    # noisy region is only located to within the spacing of the data, so the fallback is declared wider
-    widened = []
-    for k, (test, branch) in enumerate(path):
-      if test.kind not in NUMERIC:
-        widened.append((test, branch))
-        continue
-      others = [step for j, step in enumerate(path) if j != k]
-      beyond = sorted({_value(test, x) for x in self.x if all(t.branch(x) == b for t, b in others) and test.branch(x) != branch}, reverse=branch == 1)
-      if len(beyond) <= FALLBACK_MARGIN: continue  # few cases lie beyond the bound: drop it
-      inner, outer = beyond[FALLBACK_MARGIN - 1], beyond[FALLBACK_MARGIN]
-      low, high = (inner, outer) if branch == 0 else (outer, inner)
-      widened.append((test._replace(thr=pick_threshold(test.kind, low, high)), branch))
-    return widened
+def plain_when(path: Conds, schema: Schema) -> str:
+  # the conditions on the way to a leaf, in words and one clause per field: "category is one of bug, outage and tier is not enterprise"
+  values = {field["name"]: field.get("values", []) for field in schema["input"]}
+  dates = {field["name"] for field in schema["input"] if str(field.get("unit", "")).startswith("calendar date")}
+  show = lambda name, n: f"{n // 10000}-{n // 100 % 100:02d}-{n % 100:02d}" if name in dates else f"{n:,}"  # noqa: E731
+  allowed: dict[str, list[str]] = {}
+  bounds: dict[str, list[int | None]] = {}  # number field -> [lowest, highest] value that reaches the leaf
+  clauses = []
+  for test, branch in path:
+    if test.kind == "le" and test.thr.denominator == 1:
+      low, high = bounds.setdefault(test.a, [None, None])
+      n = int(test.thr)
+      bounds[test.a] = [low, n if high is None else min(high, n)] if branch == 0 else [n + 1 if low is None else max(low, n + 1), high]
+    elif test.kind in ("is", "in", "switch"):
+      here = [test.value] if test.kind == "is" else test.values if test.kind == "in" else [test.values[branch]]
+      keep = test.kind == "switch" or branch == 0
+      allowed[test.a] = [x for x in allowed.get(test.a, values[test.a]) if (x in here) == keep]
+    else: clauses.append(test.text(branch))
+  for name, (low, high) in bounds.items():
+    date = name in dates
+    if low is not None and high is not None: span = show(name, low) if low == high else f"{show(name, low)} to {show(name, high)}"
+    elif low is not None: span = f"{'after' if date else 'above'} {show(name, low - 1)}"
+    elif strict(high): span = f"{'before' if date else 'below'} {show(name, high + 1)}"  # the rule says `< 5000`, not `<= 4999`
+    else: span = f"{'on or before' if date else 'at most'} {show(name, high)}"
+    clauses.append(f"{name} is {span}")
+  for name, kept in allowed.items():
+    out = [x for x in values[name] if x not in kept]
+    if not out: continue  # every value gets here: the field does not matter on this path
+    if not kept: clauses.append(f"{name} has no value that gets here")
+    elif len(kept) == 1: clauses.append(f"{name} is {kept[0]}")
+    elif len(out) == 1: clauses.append(f"{name} is not {out[0]}")
+    else: clauses.append(f"{name} is none of {', '.join(out)}" if len(out) < len(kept) else f"{name} is one of {', '.join(kept)}")
+  return " and ".join(clauses) or "everywhere"
 
-  def fallback(self, root: Node) -> list[list[tuple[Test, int]]]:
-    # the proposed fallback region as a list of condition lists (any one list holding puts a case inside), or []
-    residual = [(leaf, path) for leaf, path in root.leaves() if leaf.misses]
-    covered = sum(len(leaf.rows) for leaf, _ in residual)
-    if not residual or covered > FALLBACK_MAX_COVER * len(root.rows) or any(not path for _, path in residual): return []
-    return [self._widen(path) for _, path in residual]
-
-def in_region(region: Sequence[Conds], x: dict) -> bool: return any(all(test.branch(x) == branch for test, branch in conds) for conds in region)
 def conds_text(conds: Conds) -> str: return " and ".join(test.text(branch) for test, branch in conds) or "everywhere"
 def root_misses(root: Node) -> int: return sum(leaf.misses for leaf, _ in root.leaves())
 
@@ -276,14 +279,10 @@ def _lean_expr(node: Node, indent: int) -> str:
   for value, body in zip(node.test.values, kids): arms.setdefault(body, []).append(f"{pascal(node.test.a)}.{value}")
   return f"(match x.{node.test.a} with" + "".join(f"\n{pad}| {' | '.join(values)} =>\n{pad}  {body}" for body, values in arms.items()) + ")"
 
-def render_lean(root: Node, region: Sequence[Conds]) -> str:
-  # Rule.lean: `f` as nested if-then-else and, when a region is proposed, `fallback`
+def render_lean(root: Node) -> str:
+  # Rule.lean: `f` as nested if-then-else
   arg = "x" if len({leaf.label for leaf, _ in root.leaves()}) > 1 else "_"
-  source = f"-- Fitted to the early half of the log by scripts/fit.py.\ndef f ({arg} : Input) : Output :=\n  {_lean_expr(root, 2)}\n"
-  if not region: return source
-  inside = " \\/\n     ".join("(" + (" /\\ ".join(test.lean(branch) for test, branch in conds) or "True") + ")" for conds in region)
-  return source + ("\n-- The region handed back to the LLM: the rule's early misses all sit inside it.\n"
-                   f"def fallback (x : Input) : Bool :=\n  if {inside}\n  then true else false\n")
+  return f"-- Fitted to the early half of the log by scripts/fit.py.\ndef f ({arg} : Input) : Output :=\n  {_lean_expr(root, 2)}\n"
 
 # *** the whole fit ***
 
@@ -292,37 +291,29 @@ def fit_report(rows: Sequence[Row], schema: Schema) -> tuple[dict[str, Any], str
   inputs, outputs = [r["typed_input"] for r in rows], [r["output"] for r in rows]
   fitter = Fitter(inputs, outputs, schema)
   root = fitter.fit()
-  region = fitter.fallback(root)
-  source = render_lean(root, region)
-  if len(source.encode()) > MAX_RULE_BYTES and region: region, source = [], render_lean(root, [])  # keep the rule under the checker's size cap
+  source = render_lean(root)
   n, missed = len(rows), root_misses(root)
   # NOTE: cross-validation inside the early half (refit on four fifths, predict the rest) is the honest preview of the replay
-  cv_hits = cv_outside = cv_outside_hits = 0
+  cv_hits = 0
   for k in range(CV_FOLDS) if n >= 2 * CV_FOLDS else []:
     tree = Fitter(inputs, outputs, schema).fit([i for i in range(n) if i % CV_FOLDS != k])
     for i in range(k, n, CV_FOLDS):
-      hit = tree.predict(inputs[i]) == outputs[i]
-      cv_hits += hit
-      if not in_region(region, inputs[i]): cv_outside, cv_outside_hits = cv_outside + 1, cv_outside_hits + hit
+      cv_hits += tree.predict(inputs[i]) == outputs[i]
   leaves = root.leaves()
   residual = [{"where": conds_text(path), "n": len(leaf.rows), "misses": leaf.misses, "outputs": dict(leaf.counts)}
               for leaf, path in sorted(leaves, key=lambda lp: -lp[0].misses) if leaf.misses]
+  ranked = sorted((lp for lp in leaves if lp[0].rows), key=lambda lp: -len(lp[0].rows))  # what the loop does most, for the report
+  rules = [{"when": plain_when(path, schema), "then": leaf.label, "share": round(len(leaf.rows) / n, 3)} for leaf, path in ranked[:5]]
+  rest = [len(ranked[5:]), round(sum(len(leaf.rows) for leaf, _ in ranked[5:]) / n, 3)]
   used = sorted({name for _, path in leaves for test, _ in path for name in (test.a, test.b) if name})
-  inside = sum(in_region(region, x) for x in inputs)
   report: dict[str, Any] = {
     "slice": "early", "n": n, "leaves": len(leaves), "fields_used": used, "fields_unused": [f for f in decision_fields(schema) if f not in used],
     "early_agreement": round(1 - missed / n, 4), "early_misses": missed, "cv_agreement": round(cv_hits / n, 4) if n >= 2 * CV_FOLDS else None,
-    "residual": residual, "residual_reading": "none" if not missed else ("region" if region else "spread")}
-  if region:
-    report["fallback"] = {"region": " OR ".join(f"({conds_text(conds)})" for conds in region), "early_inside": inside, "early_outside": n - inside,
-                          "cv_agreement_outside": round(cv_outside_hits / cv_outside, 4) if cv_outside else None}
+    "residual": residual, "rules": rules, "rules_rest": rest}
   return report, source
 
 def forecast(report: dict[str, Any]) -> tuple[float, str]:
-  # NOTE: the early half's honest preview of the exam, (agreement, what it measures): the cross-validated agreement, outside the fallback
-  # region when one is proposed (the in-sample figure there is zero misses by construction and says nothing)
-  region = report.get("fallback", {})
-  if region.get("cv_agreement_outside") is not None: return region["cv_agreement_outside"], "cross-validated, outside the fallback region"
+  # NOTE: the early half's honest preview of the exam, (agreement, what it measures): the cross-validated agreement
   if report["cv_agreement"] is not None: return report["cv_agreement"], "cross-validated"
   return report["early_agreement"], "of the early cases"
 
@@ -336,9 +327,3 @@ def learning(rows: Sequence[Row], schema: Schema) -> dict[str, Any] | None:
     tree = Fitter(inputs, outputs, schema).fit([i for i in range(n) if i % CV_FOLDS != k and (i // CV_FOLDS) % 2 == 0])
     hits += sum(tree.predict(inputs[i]) == outputs[i] for i in range(k, n, CV_FOLDS))
   return {"cv_agreement_on_half_the_cases": round(hits / n, 4)}
-
-def rank(report: dict[str, Any]) -> tuple[int, float]:
-  # how good a fitted rule looks on the early half, to choose between two fits: first its class (2: strong and whole, 1: strong outside
-  # a proposed fallback region, 0: weak), then its cross-validated agreement overall
-  strong = forecast(report)[0] >= BOUND_DETERMINISTIC
-  return (2 - ("fallback" in report) if strong else 0), report["cv_agreement"] if report["cv_agreement"] is not None else report["early_agreement"]

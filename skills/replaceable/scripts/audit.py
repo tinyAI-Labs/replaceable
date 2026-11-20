@@ -2,7 +2,7 @@
 # usage: python3 scripts/audit.py [--scope full|decision_step_only] [--derive "x.a * x.b"]... [--n-total N]
 # NOTE: it reads schema.json, logs/early.jsonl and metadata.json, never the held-out half, stops at the first exit of the procedure and
 # saves what it found to work/audit.json. Run alone it shows the fit without taking the exam; run.py calls it, the replay and the verdict.
-# A rule that is weak on the fields as typed, or needs a fallback region, is fitted again with derived quantities (derive.py and any
+# A rule that is weak on the fields as typed is fitted again with derived quantities (derive.py and any
 # offered with --derive); they stay in the rule only if the fit with them cross-validates better, so a wrong guess costs nothing.
 # The one question it asks instead of guessing is the scope. A weak rule is no question: it goes to the exam and ends INCONCLUSIVE.
 from __future__ import annotations
@@ -11,10 +11,10 @@ from pathlib import Path
 from typing import Any, Sequence
 import lean, stats
 from derive import KINDS, candidates, screen, widen
-from fit import RISING, fit_report, forecast, learning, rank
+from fit import RISING, fit_report, forecast, learning
 
 AUDIT_FILE = stats.WORK_DIR / "audit.json"
-LOG_KEYS = {"case_id", "ts", "typed_input", "output"} | stats.TOKEN_KEYS
+LOG_KEYS = {"case_id", "ts", "correct", "typed_input", "output"} | stats.TOKEN_KEYS
 MAX_DERIVE_RUNS = 2  # audit runs that may offer new --derive expressions; a run whose expressions Lean rejects does not count
 SCORES = ("early_agreement", "cv_agreement")
 
@@ -82,14 +82,15 @@ def conflicts(rows: list[stats.Row], schema: stats.Schema) -> dict[str, Any]:
 
 def fit_best(rows: list[stats.Row], schema: stats.Schema, types_src: str, offered: list[str]) -> tuple[dict[str, Any], str]:
   # NOTE: the fitted rule and its report, on the fields as typed or with derived quantities where they cross-validate better. `offered`
-  # are the reader's --derive expressions. Unless the rule on the typed fields is already strong and whole (no fallback region), the
+  # are the reader's --derive expressions. Unless the rule on the typed fields is already strong, the
   # built-in candidates are screened and those the pruned fit uses join them. Lean computes every quantity, so the numbers the fit sees
-  # are the numbers the rule will compute. The fit with them stands only if it ranks higher (`fit.rank`).
+  # are the numbers the rule will compute. The fit with them stands only if it cross-validates better.
   def diagnosed(report: dict[str, Any], *fitted: Any) -> dict[str, Any]:  # a weak rule's report gets the learning diagnostic of its rows
     return {**report, **(learning(*fitted) or {})} if forecast(report)[0] < stats.BOUND_DETERMINISTIC else report
 
   plain, plain_src = fit_report(rows, schema)
-  what = {**(candidates(rows, schema) if rank(plain)[0] < 2 else {}), **{e: "offered with --derive" for e in offered}}
+  strong = not plain["early_misses"] and forecast(plain)[0] >= stats.BOUND_DETERMINISTIC  # a whole rule needs no derived quantity
+  what = {**({} if strong else candidates(rows, schema)), **{e: "offered with --derive" for e in offered}}
   searched = [e for e in what if e not in offered]
   if not offered and not searched: return diagnosed(plain, rows, schema), plain_src
   note: dict[str, Any] = {"without_them": {k: plain[k] for k in SCORES}}
@@ -105,9 +106,10 @@ def fit_best(rows: list[stats.Row], schema: stats.Schema, types_src: str, offere
   if not expressions: return diagnosed({**plain, "derived": {**note, "used_by_the_rule": []}}, rows, schema), plain_src
   wide = widen(rows, schema, {name: columns[e] for name, e in zip(names, expressions)})
   report, source = fit_report(*wide)
-  note.update(expressions=dict(zip(names, expressions)), with_them={k: report[k] for k in SCORES})
+  meaning = {n: e.replace("x.", "") if e in offered else what[e] for n, e in zip(names, expressions)}  # in words, for the report
+  note.update(expressions=dict(zip(names, expressions)), meaning=meaning, with_them={k: report[k] for k in SCORES})
   used = [k for k, name in enumerate(names) if name in report["fields_used"]]
-  if not used or rank(report) <= rank(plain):
+  if not used or forecast(report)[0] <= forecast(plain)[0]:
     stands = {**plain, "derived": {**note, "used_by_the_rule": [], "note": "no gain in cross-validated agreement: the rule without them stands"}}
     return diagnosed(stands, rows, schema), plain_src
   source = lean.derived_defs(expressions, used, [what[e] for e in expressions]) + re.sub(r"\bx\.(derived\d+)\b", r"(\1 x)", source)
@@ -133,19 +135,20 @@ def fit_rule(rows: list[stats.Row], schema: stats.Schema, types_path: Path, rule
   types_src = types_path.read_text(encoding="utf-8")
   report, source = fit_best(rows, schema, types_src, derive)
   rule_path.write_text(source, encoding="utf-8")
-  report["rule_file"], report["rule_sha256"], report["declares_fallback"] = str(rule_path), stats.sha256(source), lean.has_fallback(source)
+  report["rule_file"], report["rule_sha256"] = str(rule_path), stats.sha256(source)
   check = lean.check_rule(types_src, source, stats.WORK_DIR)
   if not check.compiled: return {**report, "lean": {"compiled": False, "violations": list(check.violations)}}
   seen = stats.sample(rows)  # a huge log would run into the Lean timeout
   run = lean.run_rule(types_src, source, schema, [r["typed_input"] for r in seen], stats.WORK_DIR)
   if run.outputs is None: return {**report, "lean": {"compiled": True, "error": run.failure}}
   report["lean"] = {"compiled": True, "early_agreement": round(sum(p == r["output"] for p, r in zip(run.outputs, seen)) / len(seen), 4)}
-  if run.fallback is not None: report["lean"]["fallback"] = stats.fallback_stats(seen, run.outputs, run.fallback)
   return report
 
 def next_step(state: dict[str, Any]) -> dict[str, str]:
   # what the procedure does next and why; `action` is verdict, broken, scope or replay. NOTE: a weak rule is not a stop: it goes to the replay.
   if "proposed" in state: return {"action": "verdict", "why": state["proposed"]["why"]}
+  if (state.get("learning") or {}).get("unsettled"):
+    return {"action": "verdict", "why": "The loop's feedback is still moving: no exam result is allowed to say more."}
   fit = state["fit"]
   if not fit["lean"].get("compiled") or "error" in fit["lean"]:
     return {"action": "broken", "why": "The fitted rule did not pass the check or could not be run on the early half. That is a fault of the "
@@ -158,8 +161,7 @@ def next_step(state: dict[str, Any]) -> dict[str, str]:
   if "derive_rejected" in state:
     seen = f"Lean rejected {state['derive_rejected']['expressions']} ({state['derive_rejected']['error'][:300]}); that did not use up a run. " + seen
   if agreement >= stats.BOUND_DETERMINISTIC:
-    region = " It declares a fallback region (the part handed back to the LLM)." if fit["declares_fallback"] else ""
-    return {"action": "replay", "why": f"{seen}.{region} The one-shot exam on the held-back half decides."}
+    return {"action": "replay", "why": f"{seen}. The one-shot exam on the held-back half decides."}
   return {"action": "replay", "why": f"{seen}, under the {stats.BOUND_DETERMINISTIC} a deterministic verdict needs.{weak_note(fit)} The exam will "
                                      "most likely end INCONCLUSIVE; that is then the honest result, not a failure."}
 
@@ -190,9 +192,11 @@ def audit(log="logs/early.jsonl", heldout="logs/heldout.jsonl", schema="schema.j
     stats.emit({"error": f"the {MAX_DERIVE_RUNS} --derive runs are used; nothing was changed. Go on without a new --derive.", "derive_tried": tried,
                 "next": RUN_COMMAND})
     raise SystemExit(1)
+  meta = stats.read_json(metadata)
   state: dict[str, Any] = {"early_sha256": early_sha, "scope_choice": scope, "derive": kept, "derive_tried": tried, "derive_runs": len(tried),
-                           "triage": triage(rows, schema_, stats.read_json(metadata), Path(heldout), n_total, scope),
-                           "tokens": stats.token_stats(rows), "runs_per_day": stats.runs_per_day(rows)}
+                           "triage": triage(rows, schema_, meta, Path(heldout), n_total, scope),
+                           "tokens": stats.token_stats(rows), "runs_per_day": stats.runs_per_day(rows),
+                           "learning": meta.get("learning"), "log_tokens": meta.get("tokens")}
   if "exit" not in state["triage"]: state["conflicts"] = conflicts(rows, schema_)
   if "exit" not in state.get("conflicts", {"exit": 1}):
     lean.require_lean()

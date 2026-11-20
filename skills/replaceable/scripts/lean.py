@@ -20,7 +20,6 @@ _DIRECTIVE_RE = re.compile(r"#(?:eval|exit)")  # #exit would skip the harness ap
 _REDEFINE_RE = re.compile(r"\b(?:structure|inductive|def|abbrev|class)\s+(Input|Output)\b")
 _LITERAL_ARM_RE = re.compile(r'^\s*\|\s*(\d|")', re.MULTILINE)
 _AXIOMS_RE = re.compile(r"'f' depends on axioms: \[(.*?)\]", re.DOTALL)
-_FALLBACK_RE = re.compile(r"^def fallback\b", re.MULTILINE)
 
 LEAN_RESERVED = {
   "def", "theorem", "example", "structure", "inductive", "class", "instance", "where", "with", "match", "fun", "let", "have", "show", "by", "do",
@@ -35,7 +34,6 @@ RESERVED_TYPES = {
   "Task", "Thunk", "Name", "Main"}
 
 def pascal(name: str) -> str: return "".join(part.capitalize() for part in name.split("_"))
-def has_fallback(rule_src: str) -> bool: return bool(_FALLBACK_RE.search(rule_src))  # a rule claims a region with `def fallback : Input -> Bool`
 def derived_name(k: int) -> str: return f"derived{k}"
 
 def strip_comments(source: str) -> str:
@@ -130,8 +128,7 @@ def check_rule(types_src: str, rule_src: str, workdir: Path, **lean: Any) -> Che
   # scan, then compile Types.lean + Rule.lean and verify the axioms `f` depends on
   violations = scan_rule(rule_src)
   if violations: return CheckResult(False, tuple(violations))
-  typecheck = "def harnessTypecheckFallback : Input → Bool := fallback\n" if has_fallback(rule_src) else ""
-  source = f"{types_src}\n{rule_src}\n\ndef harnessTypecheckF : Input → Output := f\n{typecheck}#print axioms f\n"
+  source = f"{types_src}\n{rule_src}\n\ndef harnessTypecheckF : Input → Output := f\n#print axioms f\n"
   run = run_lean(source, workdir, run=False, timeout=CHECK_TIMEOUT, **lean)
   if run.failure in ("timeout", "output_limit", "lean_not_found"): return CheckResult(False, (f"checker_{run.failure}",))
   if not run.ok: return CheckResult(False, ("compile_error: " + "\n".join(line for line in run.output.splitlines() if "error" in line)[:600],))
@@ -153,7 +150,6 @@ def literal(schema: Schema, typed: dict[str, Any]) -> str:
 class RuleRun(NamedTuple):
   outputs: list[str] | None  # predicted outputs in input order, or None with a failure code
   failure: str | None = None  # `replay_timeout`, `output_limit` or `replay_failed`
-  fallback: list[bool] | None = None  # per-input fallback flags, only when the rule defines `fallback`
 
 def _harness(schema: Schema, inputs: Sequence[dict[str, Any]], line: str) -> str:
   # NOTE: Lean elaborates one huge literal or one huge `do` block recursively, so the cases go in as small arrays and the calls in
@@ -173,19 +169,15 @@ def _records(run: LeanRun, n: int) -> list[list[str]] | None:
   return records if run.ok and len(records) == n else None
 
 def run_rule(types_src: str, rule_src: str, schema: Schema, inputs: Sequence[dict[str, Any]], workdir: Path, **lean: Any) -> RuleRun:
-  # run `f` (and `fallback`, if defined) over typed inputs. NOTE: expected outputs never enter the Lean source.
-  values, with_fallback = schema["output"]["values"], has_fallback(rule_src)
+  # run `f` over typed inputs. NOTE: expected outputs never enter the Lean source.
+  values = schema["output"]["values"]
   arms = "\n".join(f"  | .{v} => \"{v}\"" for v in values)
-  flag = ' ++ "|" ++ (if fallback x then "1" else "0")' if with_fallback else ""
-  source = f"{types_src}\n{rule_src}\n\ndef harnessSer : Output → String\n{arms}\n\n" + _harness(schema, inputs, f"harnessSer (f x){flag}")
+  source = f"{types_src}\n{rule_src}\n\ndef harnessSer : Output → String\n{arms}\n\n" + _harness(schema, inputs, "harnessSer (f x)")
   run = run_lean(source, workdir, run=True, timeout=RUN_TIMEOUT, **lean)
   if run.failure in ("timeout", "output_limit"): return RuleRun(None, "replay_timeout" if run.failure == "timeout" else "output_limit")
   records = _records(run, len(inputs))
   if records is None or any(r[0] not in values for r in records): return RuleRun(None, "replay_failed")
-  outputs = [r[0] for r in records]
-  if not with_fallback: return RuleRun(outputs)
-  if any(len(r) != 2 or r[1] not in ("0", "1") for r in records): return RuleRun(None, "replay_failed")
-  return RuleRun(outputs, fallback=[r[1] == "1" for r in records])
+  return RuleRun([r[0] for r in records])
 
 def derived_defs(expressions: Sequence[str], keep: Sequence[int] | None = None, notes: Sequence[str] = ()) -> str:
   # Lean helpers for derived quantities: `def derived<k> (x : Input) : Nat := <expression>`, each under its note as a comment

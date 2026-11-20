@@ -31,12 +31,6 @@ def summary(rng: Random):
   x = {"topic": _pick(rng, ("fees", "outage", "fraud"))}
   return x, f"Customer wrote about {x['topic']}; reference {int(rng.random() * 1_000_000)}."
 
-def refund(rng: Random):
-  # core plus fallback: a threshold per reason, except damaged goods between 50 and 200 euros, which vary
-  x = {"reason": _pick(rng, ("late", "damaged", "unwanted")), "amount_cents": int(rng.random() * 40_000)}
-  if x["reason"] == "damaged" and 5_000 <= x["amount_cents"] < 20_000: return x, "manual" if rng.random() < 0.65 else "refund"
-  return x, "refund" if x["amount_cents"] < {"late": 10_000, "damaged": 5_000, "unwanted": 2_500}[x["reason"]] else "manual"
-
 def order(rng: Random):
   # deterministic on the order total, units times unit price: the built-in search for a derived quantity has to find it
   x = {"units": 1 + int(rng.random() * 400), "unit_price_cents": 100 + int(rng.random() * 50_000), "express": rng.random() < 0.3}
@@ -60,7 +54,6 @@ LOOPS: tuple[tuple[str, Draw, int, str, dict[str, Any]], ...] = (
   ("shipping", shipping, 600, "DETERMINISTIC", {"host": True}),
   ("ticket", ticket, 400, "PROBABILISTIC", {}),
   ("summary", summary, 300, "OUT_OF_SCOPE", {}),
-  ("refund", refund, 800, "DETERMINISTIC_CORE_FALLBACK", {}),
   ("shipping_small", shipping, 100, "INCONCLUSIVE", {}),
   ("order", order, 600, "DETERMINISTIC", {}),
   ("shard", shard, 600, "DETERMINISTIC", {"derive": "x.ticket_no % 2"}),

@@ -1,0 +1,4 @@
+VERDICT: PROBABILISTIC
+Loop: Reads reason, amount and days and decides one of 3 outcomes (approve, deny and v_partial).
+Answer: No, not deterministic. Its feedback holds at 80%, below 95%: the whole log was checked.
+Tokens: 3,135 per run, about 33,884,910 a month.

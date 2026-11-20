@@ -1,5 +1,5 @@
 # how a raw log is typed: numbers, dates, enums, names, and what must stop the run
-import subprocess, sys, tempfile, unittest
+import json, subprocess, sys, tempfile, unittest
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "skills" / "replaceable" / "scripts"))
 import prepare
@@ -45,7 +45,80 @@ class TestPrepareTyping(unittest.TestCase):
     free_text = [{"typed_input": {"n": i}, "output": f"text {i}"} for i in range(21)]
     self.assertEqual(prepare.infer(free_text, set())[0]["output"]["values"], [])
 
-if __name__ == "__main__": unittest.main()
+
+class TestPrepareLearning(unittest.TestCase):  # `correct` on every run sets the learning phase aside
+  def test_the_runs_before_convergence_are_not_the_log(self):
+    rows = [{"case_id": f"r{i:03d}", "ts": i, "tokens": 800 if i < 300 else 100, "typed_input": {"n": i % 7}, "output": "a" if i % 7 < 3 else "b",
+             "correct": i % 5 >= 2 if i < 300 else True} for i in range(700)]
+    with tempfile.TemporaryDirectory() as tmp:
+      (Path(tmp) / "raw.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+      subprocess.run([sys.executable, str(Path(prepare.__file__)), "raw.jsonl"], cwd=tmp, capture_output=True, text=True, check=True)
+      meta, schema = (json.loads((Path(tmp) / name).read_text()) for name in ("metadata.json", "schema.json"))
+      kept = [json.loads(line) for name in ("early", "heldout") for line in (Path(tmp) / "logs" / f"{name}.jsonl").read_text().splitlines()]
+    start = meta["learning"]["from_run"]
+    self.assertTrue(300 <= start <= 450, start)  # it may give up a few clean runs after the change
+    self.assertEqual((meta["learning"]["converged"], meta["learning"]["runs"], meta["n_total"]), (True, 700, 700 - start))
+    self.assertEqual(meta["learning"]["tokens"]["with_tokens"], start)  # the runs set aside keep their own numbers
+    self.assertEqual(meta["tokens"]["mean"], 100)
+    self.assertEqual({r["case_id"] for r in kept}, {f"r{i:03d}" for i in range(start, 700)})
+    self.assertEqual([f["name"] for f in schema["input"]], ["n"])  # feedback is never an input of the rule
+
+  def prepare(self, rows, *args):
+    with tempfile.TemporaryDirectory() as tmp:
+      (Path(tmp) / "raw.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+      done = subprocess.run([sys.executable, str(Path(prepare.__file__)), "raw.jsonl", *args], cwd=tmp, capture_output=True, text=True, check=False)
+      meta = json.loads((Path(tmp) / "metadata.json").read_text()) if done.returncode == 0 else None
+    return done.returncode, done.stdout + done.stderr, meta
+  def run_of(self, n, correct):
+    return [{"case_id": f"r{i:04d}", "ts": i, "typed_input": {"n": i % 7}, "output": "a" if i % 7 < 3 else "b", "correct": correct(i)}
+            for i in range(n)]
+  def test_feedback_must_be_true_or_false_on_every_run(self):
+    rows = self.run_of(400, lambda i: True)
+    code, said, _ = self.prepare([*rows[:5], {**rows[5], "correct": "true"}, *rows[6:]])
+    self.assertEqual(code, 1)
+    self.assertIn("line 6: `correct` must be true or false", said)
+    code, said, _ = self.prepare([*rows[:5], {k: v for k, v in rows[5].items() if k != "correct"}, *rows[6:]])
+    self.assertEqual(code, 1)
+    self.assertIn("on some lines but not on all", said)
+  def test_a_loop_that_holds_below_95_percent_is_examined_on_its_steady_stretch(self):
+    _, _, meta = self.prepare(self.run_of(1000, lambda i: i % 5 != 0 if i >= 300 else i % 5 >= 2))  # 60%, then a steady 80% from run 300
+    self.assertEqual((meta["learning"]["converged"], meta["learning"]["accuracy"]), (False, 0.8))
+    self.assertTrue(300 <= meta["learning"]["examined_from"] <= 450)
+    self.assertEqual(meta["n_total"], 1000 - meta["learning"]["examined_from"])
+  def test_a_loop_whose_feedback_is_still_moving_is_marked_unsettled(self):
+    changed = lambda i: i % 5 >= 2 if i < 700 else i % 10 != 0  # noqa: E731  60%, then 90% for the last 300 runs
+    _, _, meta = self.prepare(self.run_of(1000, changed))
+    moving = meta["learning"]["unsettled"]
+    self.assertEqual((meta["learning"]["converged"], moving["recent"], moving["runs"]), (False, 0.9, 200))
+    _, _, meta = self.prepare(self.run_of(100, lambda i: False))  # too short to have a learning phase at all
+    self.assertNotIn("learning", meta)
+  def test_a_slow_climb_with_no_step_is_unsettled(self):
+    wrong = lambda i: ((i % 750) * 7919) % 750 < (129, 101, 83, 67)[i // 750]  # noqa: E731  82.8%, 86.5%, 88.9%, 91.1%, scattered
+    _, _, meta = self.prepare(self.run_of(3000, lambda i: not wrong(i)))
+    self.assertTrue(meta["learning"]["unsettled"]["drift"])
+  def test_flat_below_95_in_a_short_log_is_examined_whole(self):
+    _, _, meta = self.prepare(self.run_of(260, lambda i: i % 5 != 0))
+    self.assertEqual((meta["learning"]["examined_from"], meta["n_total"]), (0, 260))  # halving 260 runs would leave under 150
+  def test_a_log_that_was_good_from_the_start_has_no_learning_phase(self):
+    _, _, meta = self.prepare(self.run_of(600, lambda i: i % 25 != 0))  # 96% throughout
+    self.assertNotIn("from_run", meta["learning"])
+  def test_a_dip_in_a_loop_that_was_right_all_along_is_not_a_learning_phase(self):
+    _, _, meta = self.prepare(self.run_of(3000, lambda i: not (2000 <= i < 2100 and i % 5 == 0)))  # one block at 80% in the middle of a perfect run
+    self.assertNotIn("from_run", meta["learning"])
+    self.assertEqual(meta["n_total"], 3000)
+  def test_a_fix_in_the_last_runs_is_the_start_of_the_tail_and_the_old_policy_stays_out(self):
+    _, _, meta = self.prepare(self.run_of(1000, lambda i: i >= 750 or i % 25 < 23))  # 92% for 750 runs, then 250 clean ones
+    self.assertTrue(750 <= meta["learning"]["from_run"] <= 850)
+    self.assertEqual(meta["learning"]["accuracy_before"], 0.92)
+  def test_after_max_rows_the_accuracy_is_that_of_the_runs_kept(self):
+    correct = lambda i: True if i >= 600 else (i % 5 >= 2 if i < 300 else i % 100 != 0)  # noqa: E731  learns, then three slips, then none
+    _, _, meta = self.prepare(self.run_of(1000, correct), "--max-rows", "400")
+    self.assertEqual((meta["learning"]["accuracy"], meta["learning"]["trimmed"]), (1.0, True))
+  def test_the_learning_phase_is_found_before_max_rows_trims_the_log(self):
+    code, _, meta = self.prepare(self.run_of(1000, lambda i: i >= 300 or i % 5 >= 2), "--max-rows", "400")
+    self.assertEqual((code, meta["learning"]["runs"], meta["n_total"]), (0, 1000, 400))
+    self.assertTrue(300 <= meta["learning"]["from_run"] <= 600)  # the learning phase is found on all 1000 runs, not on the 400 kept
+    self.assertTrue(meta["learning"]["trimmed"])
 
 class TestPrepareInput(unittest.TestCase):  # a log that is not JSON lines must be told so, not crash
   def run_on(self, text):
@@ -59,3 +132,5 @@ class TestPrepareInput(unittest.TestCase):  # a log that is not JSON lines must 
       self.assertEqual(code, 1)
       self.assertNotIn("Traceback", said)
       self.assertIn("converted first", said)
+
+if __name__ == "__main__": unittest.main()

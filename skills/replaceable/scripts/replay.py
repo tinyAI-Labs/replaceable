@@ -13,7 +13,7 @@ USED = {"error": "replay already used: the first result stands"}
 
 def replay_report(types_src: str, rule_src: str, schema: stats.Schema, early: Sequence[stats.Row], heldout: Sequence[stats.Row], workdir: Path,
                   **lean_args: Any) -> dict[str, Any]:
-  # agreement of `f` with the held-out outputs: counts, 95% lower bound, baseline, fallback containment; {"failure": code} if it did not run
+  # agreement of `f` with the held-out outputs: counts, 95% lower bound, baseline; {"failure": code} if it did not run
   held = stats.sample(heldout)  # a huge held-back half is replayed as a fixed sample; the bound below counts the cases actually replayed
   run = lean.run_rule(types_src, rule_src, schema, [r["typed_input"] for r in held], workdir, **lean_args)
   if run.outputs is None: return {"failure": run.failure}
@@ -25,7 +25,6 @@ def replay_report(types_src: str, rule_src: str, schema: stats.Schema, early: Se
             "counterexamples": stats.misses(held, run.outputs, 3)}
   if n < len(heldout): report["sampled_from"] = len(heldout)
   if learned_exam and (model := learned_exam(schema, early, held)): report["model"] = model  # NOTE: numbers only; the model is gone when this returns
-  if run.fallback is not None: report["fallback"] = stats.fallback_stats(held, run.outputs, run.fallback)
   if stats.token_stats(heldout)["with_tokens"]: report["tokens"] = stats.token_stats(heldout)  # NOTE: aggregates only, like everything in the receipt
   return report
 

@@ -1,32 +1,67 @@
 # the verdict as code: computed from work/audit.json and work/receipt.json, written to verdict.json (the table is in SKILL.md)
 # usage: python3 scripts/verdict.py [--scope full|decision_step_only] [--note "..."]
 from __future__ import annotations
-import argparse, json, sys
+import argparse, json, re, sys
 from pathlib import Path
 from typing import Any
 import stats
-from stats import BOUND_CORE, BOUND_DETERMINISTIC, MIN_HELDOUT
+from stats import BOUND_DETERMINISTIC, MIN_HELDOUT
 from replay import read_receipt
 from audit import AUDIT_COMMAND, AUDIT_FILE, REPLAY_COMMAND, RUN_COMMAND, VERDICT_COMMAND, weak_note
 
-SCOPED = ("DETERMINISTIC", "DETERMINISTIC_CORE_FALLBACK", "DETERMINISTIC_LEARNED", "CONSTANT")
+SCOPED = ("DETERMINISTIC", "DETERMINISTIC_LEARNED", "CONSTANT")
 
 ASK = "Do you want to reduce your token spend for this agentic loop to zero? Find out how: https://tinyailabs.com/"
-# NOTE: the owner's whole report is two lines: one answer per verdict and what the loop spends. How the verdict came about is printed only on --why.
+# NOTE: the owner's report is a few lines: the loop, the answer, what it spends and the question. How the verdict came about is printed only on --why.
+MIN_PHASE = 30  # runs a phase needs before its token cost is compared with the other's
 ANSWERS = {
-  "DETERMINISTIC": "Yes, deterministic.", "DETERMINISTIC_CORE_FALLBACK": "Mostly deterministic.", "CONSTANT": "Yes, constant.",
+  "DETERMINISTIC": "Yes, deterministic.", "CONSTANT": "Yes, constant.",
   "DETERMINISTIC_LEARNED": "Yes, deterministic (no readable rule).", "PROBABILISTIC": "No, not deterministic.",
   "INCONCLUSIVE": "Cannot tell from this log.", "OUT_OF_SCOPE": "Not applicable: the output is free text, not a typed decision."}
 
-def tokens_line(tokens: dict[str, Any], usd: float | None = None, ask: bool = True) -> str:
-  # the second line: what the loop spends, from the log's own counts (a price only if given, a pace only if the log has dates), then the question,
-  # asked only of a loop that could be replaced
-  tail = f" {ASK}" if ask else ""
-  if not tokens["known"]: return f"Tokens: not in this log.{tail}"
-  said = f"this loop used {tokens['per_run']:,.0f} per run, {tokens['logged']:,} over its {tokens['cases_with_tokens']:,} logged runs"
-  if "per_month" in tokens: said += f", at that pace about {tokens['per_month']:,} a month"
-  total, span = (tokens["per_month"], "a month") if "per_month" in tokens else (tokens["logged"], "over the logged runs")
-  return f"Tokens: {said}" + (f" (about ${total * usd / 1e6:,.2f} {span} at ${usd:g} per million tokens)" if usd else "") + f".{tail}"
+def pct(share: float) -> str:
+  return f"{int(share * 100)}%"  # rounded down: a figure below the bar must not be shown as the bar
+
+def moving_text(moving: dict[str, float]) -> str:
+  if moving.get("drift"):
+    return f"it is still moving ({pct(moving['before'])} early in its last {moving['runs']} runs, {pct(moving['recent'])} at the end)"
+  return f"it changed {moving['runs']} runs before the end of the log ({pct(moving['recent'])} right since, {pct(moving['before'])} before)"
+
+def answer_line(result: dict[str, Any]) -> str:
+  # the answer, and when the log came with the loop's own feedback, which part of the log it is about
+  learned, text = result.get("learning"), ANSWERS[result["verdict"]]
+  if learned and learned.get("from_run"):
+    text += f" Checked on the runs after the loop held 95% accuracy (after run {learned['from_run']:,} of {learned['runs']:,})."
+  elif learned and learned.get("unsettled"):
+    text += f" Its feedback has not settled: {moving_text(learned['unsettled'])}. Run this again once it has been steady for 300 or more runs."
+  elif learned and not learned["converged"]:
+    text += (f" Its feedback holds at {pct(learned['accuracy'])}, below 95%: "
+             f"{'its steady stretch' if learned['examined_from'] else 'the whole log'} was checked.")
+  if learned and learned.get("trimmed"): text += " (--max-rows: only its latest runs.)"
+  return f"Answer: {text}"
+
+def learning_cost(tokens: dict[str, Any]) -> tuple[float, float] | None:
+  # (tokens per run in the learning phase, how many times the converged loop's cost) once both phases are long enough to compare
+  spent = (tokens.get("learning") or {}).get("tokens") or {}
+  if spent.get("with_tokens", 0) >= MIN_PHASE and tokens["cases_with_tokens"] >= MIN_PHASE and tokens["per_run"]:
+    return spent["mean"], spent["mean"] / tokens["per_run"]
+  return None
+
+def tokens_line(tokens: dict[str, Any], usd: float | None = None) -> str:
+  # what the loop spends, from the log's own counts: per run, per month if the log has dates (else over the logged runs), a price only if given,
+  # and what the runs before it converged cost
+  if not tokens["known"]: return "Tokens: not in this log."
+  learned = tokens.get("learning") or {}
+  runs = ("latest runs" if learned.get("trimmed") else "runs after it converged" if "from_run" in learned
+          else "runs in its steady stretch" if learned.get("examined_from") else "logged runs")
+  total = tokens.get("per_month") or tokens["logged"]
+  over = f"about {total:,} a month" if tokens.get("per_month") else f"{total:,} over its {tokens['cases_with_tokens']:,} {runs}"
+  said = f"{tokens['per_run']:,.0f} per run, {over}"
+  if usd: said += f" (about ${total * usd / 1e6:,.2f} at ${usd:g} per million tokens)"
+  if cost := learning_cost(tokens):  # what a budget made from the converged cost leaves out
+    early = f"the first {learned['from_run']:,} runs, before it converged ({pct(learned['accuracy_before'])} accurate)"
+    said += f"; {early}, cost {cost[0]:,.0f} per run, {cost[1]:.1f}x as much"
+  return f"Tokens: {said}."
 
 def verdict_from_replay(replay: dict[str, Any]) -> tuple[str, str]:
   # NOTE: (verdict, reason) for a replay report or receipt. L is the exact one-sided 95% lower bound on the held-out agreement. The rows
@@ -40,24 +75,18 @@ def verdict_from_replay(replay: dict[str, Any]) -> tuple[str, str]:
     if stats.beats_baseline(low, base): return "DETERMINISTIC", f"{seen}; always answering the most common output would match {base}."
     return "INCONCLUSIVE", (f"{seen}, but always answering the most common output already matches {base}: "
                             "there are too few cases of the other outputs to tell a rule from a constant.")
-  fb = replay.get("fallback")
-  if low >= BOUND_CORE and fb and fb["inside"] >= 1 and fb["outside"] >= MIN_HELDOUT and fb["outside_lower_bound"] >= BOUND_DETERMINISTIC:
-    return "DETERMINISTIC_CORE_FALLBACK", (
-      f"{seen}; outside the declared fallback region it matched {fb['outside'] - fb['misses_outside']} of {fb['outside']} "
-      f"(95% lower bound {fb['outside_lower_bound']}), and {fb['inside']} held-back cases fall inside the region.")
   model = replay.get("model")  # NOTE: last of the passing rows: the model turns an INCONCLUSIVE into a verdict, never one verdict into another
   if model and model["lower_bound"] >= BOUND_DETERMINISTIC and stats.beats_baseline(model["lower_bound"], model["baseline"]):
     return "DETERMINISTIC_LEARNED", f"{seen}: no readable rule reaches {BOUND_DETERMINISTIC}. {model['why']}"
-  if low >= BOUND_CORE:
-    why = "no fallback region was declared" if not fb else (
-      f"the fallback region does not contain the misses ({fb['misses_outside']} misses in the {fb['outside']} cases outside it, "
-      f"95% lower bound {fb['outside_lower_bound']}; {BOUND_DETERMINISTIC} on at least {MIN_HELDOUT} cases is needed)")
-    return "INCONCLUSIVE", f"{seen}: below {BOUND_DETERMINISTIC}, and {why}."
-  return "INCONCLUSIVE", f"{seen}: below {BOUND_CORE}. No rule was found; that alone does not show the loop is probabilistic."
+  return "INCONCLUSIVE", f"{seen}: below {BOUND_DETERMINISTIC}. No rule reaches it; that alone does not show the loop is probabilistic."
 
 def build(state: dict[str, Any], receipt: dict[str, Any] | None, rule_src: str | None, scope: str | None) -> dict[str, Any]:
   # the verdict object, or {"error": ..., "needs": the missing step} when it cannot be given yet
-  proposed = state.get("proposed")
+  moving, proposed = (state.get("learning") or {}).get("unsettled"), state.get("proposed")
+  if moving and (proposed or {}).get("verdict") != "OUT_OF_SCOPE":  # NOTE: a policy still being corrected cannot be tested, whatever an exam says
+    return {"verdict": "INCONCLUSIVE", "exit_stage": "feedback", "rationale": (
+      f"The loop's feedback has not settled: {moving_text(moving)}. A policy that is still being corrected has nothing fixed to replace; run the "
+      "check again once it has been steady for 300 or more runs.")}
   if proposed:  # triage or conflicts exit: no rule is involved
     verdict = {"verdict": proposed["verdict"], "exit_stage": proposed["exit_stage"], "rationale": proposed["why"]}
     if proposed["verdict"] == "PROBABILISTIC":
@@ -86,8 +115,7 @@ def build(state: dict[str, Any], receipt: dict[str, Any] | None, rule_src: str |
     verdict["scope"] = scope or state["triage"]["scope"]
     if verdict["scope"] == "decision_step_only":
       verdict["rationale"] += " Scope: the decision step on typed fields only; the extraction step that produces those fields stays probabilistic."
-  if name == "DETERMINISTIC_CORE_FALLBACK":
-    verdict["fallback_region"] = fit.get("fallback", {}).get("region") or "the region where `fallback` in Rule.lean is true"
+  if name == "DETERMINISTIC_LEARNED": verdict["model"] = {k: receipt["model"][k] for k in ("n", "n_match", "lower_bound", "baseline")}
   if name == "INCONCLUSIVE" and ran and receipt["lower_bound"] < BOUND_DETERMINISTIC: verdict["rationale"] += weak_note(fit)
   if name == "INCONCLUSIVE" and (scan.get("near") or {}).get("neighbour_disagreement") is not None and ran:
     verdict["rationale"] += (f" Diagnostic: {scan['near']['neighbour_disagreement']:.0%} of early cases differ from their nearest neighbour (random "
@@ -107,18 +135,21 @@ def token_block(state: dict[str, Any], receipt: dict[str, Any] | None, verdict: 
   # half from the audit, held-back half as aggregates from the replay receipt); the saving is that mean times the share of runs the rule
   # takes over. No count in the log means unknown: nothing is estimated from text length.
   halves = {name: t for name, t in (("early", state.get("tokens")), ("heldout", (receipt or {}).get("tokens"))) if t and t["with_tokens"]}
+  whole = state.get("log_tokens")
+  if receipt is None and whole and whole["with_tokens"]: halves = {"log": whole}  # an early exit: no replay, but the count is known
   if not halves: return {"known": False, "note": "no token count in the log lines; add `tokens` (or `usage`) per case to get token use and savings"}
   n, total, name = sum(t["with_tokens"] for t in halves.values()), sum(t["total"] for t in halves.values()), verdict["verdict"]
   if name in ("DETERMINISTIC", "CONSTANT"): share, why = 1.0, f"{name}: the rule takes over every run"
-  elif name == "DETERMINISTIC_CORE_FALLBACK":
-    outside, held = receipt["fallback"]["outside"], receipt["n_heldout"]
-    share, why = round(outside / held, 4), f"{outside} of {held} held-back cases lie outside the fallback region; the rest stays with the LLM"
   else: share, why = 0.0, f"{name}: no rule replaces the loop"
   mean = round(total / n, 1)
   block = {"known": True, "per_run": mean, "logged": total, "cases_with_tokens": n, "halves": halves, "rule_share": share,
            "saved_per_run": round(share * mean, 1), "saved_logged": round(share * total)}
+  if learned := state.get("learning"):  # the loop, seen from the runs before it converged
+    kept = ("runs", "from_run", "accuracy_before", "examined_from", "trimmed")
+    block["learning"] = {k: learned[k] for k in kept if k in learned} | {"tokens": learned.get("tokens")}
   if state.get("runs_per_day"): block["per_month"] = round(mean * state["runs_per_day"] * 30)  # at the pace of the early half of the log
-  block["arithmetic"] = (f"{total} tokens / {n} runs with a count ({' + '.join(halves)} half) = {mean} per run; rule share {share} ({why}); saved "
+  where = "the log examined" if "log" in halves else " + ".join(halves) + " half"
+  block["arithmetic"] = (f"{total} tokens / {n} runs with a count ({where}) = {mean} per run; rule share {share} ({why}); saved "
                          f"per run = {share} x {mean} = {block['saved_per_run']}; saved over the log = {share} x {total} = {block['saved_logged']}")
   if share and verdict.get("scope") == "decision_step_only":
     block["note"] = "upper bound: the extraction step stays with the LLM, and the log does not split its tokens from the decision step's"
@@ -133,6 +164,15 @@ def write(scope: str | None = None, note: str | None = None, rule="Rule.lean", o
   if note: verdict["rationale"] += f" Note: {note}"
   verdict["completed_by"] = completed_by(state)
   verdict["tokens"] = token_block(state, receipt, verdict)
+  if state.get("learning"): verdict["learning"] = {k: v for k, v in state["learning"].items() if k != "tokens"}
+  if Path("schema.json").is_file():  # the loop in the owner's words: what it reads, what it can answer
+    schema = stats.read_schema("schema.json")
+    verdict["loop"] = {"reads": stats.decision_fields(schema), "answers": schema["output"]["values"]}
+  fit = state.get("fit", {})
+  if verdict["verdict"] in ("DETERMINISTIC", "CONSTANT") and fit.get("rules"):  # the rule that was examined, its main branches
+    names = fit.get("derived", {}).get("meaning", {})  # "derived0" -> "month of signed"
+    verdict["rules"] = [{**r, "when": re.sub(r"\bderived\d+\b", lambda m: names.get(m.group(), m.group()), r["when"])} for r in fit["rules"]]
+    verdict["rules_rest"] = fit["rules_rest"]
   stats.write_text_atomic(Path(out), json.dumps(verdict, indent=2))
   return verdict
 
@@ -154,7 +194,9 @@ def conclude(scope: str | None = None, note: str | None = None, why: bool = Fals
     print("NEXT: nothing to run; verdict.json is written. Report it as it is." + (
       " A person confirms that Rule.lean matches the written policy before it replaces the loop."
       if "scope" in result and result["verdict"] != "DETERMINISTIC_LEARNED" else ""))
-  print(f"Answer: {ANSWERS[result['verdict']]}\n{tokens_line(result['tokens'], usd, result['verdict'] in SCOPED)}")
+  import report  # here, not on top: report reads this module
+  report.write(result, usd)
+  print(report.terminal(result, usd))
   return 0
 
 if __name__ == "__main__":
@@ -164,4 +206,7 @@ if __name__ == "__main__":
   args = parser.parse_args()
   verdict = write(args.scope, args.note)
   stats.emit(verdict if "error" in verdict else {"written": "verdict.json", **verdict})
+  if "error" not in verdict:  # the reports follow a changed verdict (a --note)
+    import report
+    report.write(verdict)
   sys.exit(1 if "error" in verdict else 0)

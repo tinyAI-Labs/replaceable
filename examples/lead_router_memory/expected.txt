@@ -1,0 +1,4 @@
+VERDICT: INCONCLUSIVE
+Loop: Reads territory, arr and employees and decides one of 8 outcomes (desk_central, desk_east, desk_north, desk_overseas, desk_south and 3 more).
+Answer: Cannot tell from this log. Checked on the runs after the loop held 95% accuracy (after run 750 of 4,000).
+Tokens: 815 per run, about 8,809,581 a month; the first 750 runs, before it converged (76% accurate), cost 2,181 per run, 2.7x as much.

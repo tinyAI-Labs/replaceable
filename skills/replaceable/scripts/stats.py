@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib, json, os, sys, zlib
 from datetime import datetime
 from collections import Counter
-from math import ceil, exp, lgamma, log, log1p
+from math import ceil, exp, lgamma, log, log1p, sqrt
 from pathlib import Path
 from statistics import median
 from typing import Any, Sequence
@@ -20,13 +20,12 @@ REQUEST_FILE = "replay_request.json"  # left in WORK_DIR by run.py when the host
 
 # the decision thresholds of the procedure (SKILL.md states the same numbers)
 MIN_TOTAL = 150  # logged cases needed before anything is tested
-MIN_HELDOUT = 60  # held-back cases needed for a replay verdict (and outside a fallback region)
+MIN_HELDOUT = 60  # held-back cases needed for a replay verdict
 CONFLICT_THRESHOLD = 0.05  # share of the repeated-input cases that disagree with the majority of their identical-input group
 MIN_CONFLICT_GROUPS = 2  # distinct inputs that must show a conflict before the loop is called PROBABILISTIC
 MAX_LEAN_CASES = 50_000  # one Lean run takes about this many cases; more runs into its timeout
 MIN_REPEAT_SHARE = 0.2  # below this almost every input is unique and the conflict scan cannot see anything
 BOUND_DETERMINISTIC = 0.95  # 95% lower bound on held-out agreement for DETERMINISTIC and CONSTANT
-BOUND_CORE = 0.80  # ... for DETERMINISTIC_CORE_FALLBACK
 BASELINE_ERROR_RATIO = 0.5  # the rule's error bound (1 - L) may be at most this share of the error of the most common output
 
 def sha256(data: str | bytes) -> str: return hashlib.sha256(data.encode() if isinstance(data, str) else data).hexdigest()
@@ -103,6 +102,38 @@ def token_stats(rows: Sequence[Row]) -> dict[str, Any]:
   if not counts: return {"cases": len(rows), "with_tokens": 0}
   return {"cases": len(rows), "with_tokens": len(counts), "total": sum(counts), "mean": round(sum(counts) / len(counts), 1),
           "median": median(counts), "p90": counts[ceil(0.9 * len(counts)) - 1]}
+
+def curve(rows: Sequence[Row], blocks: int = 24) -> list[list[float | None]]:
+  # the loop over time for the report: per equal block of the log, [share of runs right, mean tokens per run (None if the block has no count)]
+  k = min(blocks, len(rows))
+  size = len(rows) // k
+  parts = [rows[i * size:(i + 1) * size] for i in range(k - 1)] + [rows[(k - 1) * size:]]  # the last block takes the remainder
+  return [[round(sum(r["correct"] for r in part) / len(part), 3), token_stats(part).get("mean")] for part in parts]
+
+PLATEAU, MIN_TAIL, SPAN, STEP = 0.95, 150, 300, 50  # holding 95% takes 150+ runs; a change is looked for at every 50th run, over 300-run stretches
+
+def steady_from(correct: Sequence[bool]) -> int:
+  # the run from which the loop's feedback is steady: the start of the stretch after its latest change. At every STEP-th run from the end (100+ runs
+  # must follow it) the stretch of up to SPAN runs after the run is compared with the equal stretch before it; a change is a difference of at least
+  # 2 points and 3.5 standard errors. The scan starts at the end, so the tail never holds the old policy; it may give up some runs after the change
+  n = len(correct)
+  total = [0]
+  for ok in correct: total.append(total[-1] + ok)
+  for t in range(n - 100, 99, -STEP):
+    m = min(SPAN, n - t, t)
+    after, before = total[t + m] - total[t], total[t] - total[t - m]
+    pooled = (after + before + 1) / (2 * m + 2)
+    if abs(after - before) / m >= max(0.02, 3.5 * sqrt(pooled * (1 - pooled) * 2 / m)): return t
+  return 0
+
+def drifting(correct: Sequence[bool]) -> tuple[float, float] | None:
+  # (the first third's accuracy, the last third's) if the feedback in a steady stretch still climbs or sinks across it, else None: the scan above
+  # finds steps, this finds a slow slope. Same bar as a change: 2 points and 3.5 standard errors
+  third = len(correct) // 3
+  if third < 50: return None
+  first, last = sum(correct[:third]), sum(correct[-third:])
+  pooled = (first + last + 1) / (2 * third + 2)
+  return (first / third, last / third) if abs(first - last) / third >= max(0.02, 3.5 * sqrt(pooled * (1 - pooled) * 2 / third)) else None
 
 def runs_per_day(rows: Sequence[Row]) -> float | None:
   # the pace a token count is extrapolated at; None unless `ts` are ISO timestamps that span a day (a counter, or no ts, says nothing about time)
@@ -205,13 +236,6 @@ def conflict_reading(scan: dict[str, Any]) -> tuple[str, str]:
     return "one_group", (f"Over {CONFLICT_THRESHOLD:.0%} of the repeated cases conflict, but all for one input: a single group is not enough "
                          "to call the loop probabilistic. Continue to the rule.")
   return "noise", f"Repeated inputs agree (conflicts at or under {CONFLICT_THRESHOLD:.0%}). Continue to the rule."
-
-def fallback_stats(rows: Sequence[Row], predicted: Sequence[str], flags: Sequence[bool]) -> dict[str, Any]:
-  # containment counts for a core-plus-fallback rule: mismatches must sit inside the declared region
-  outside = [(p, r) for p, r, inside in zip(predicted, rows, flags) if not inside]
-  misses_outside = sum(p != r["output"] for p, r in outside)
-  return {"inside": sum(flags), "outside": len(outside), "misses_outside": misses_outside,
-          "outside_lower_bound": round(clopper_pearson_lower(len(outside) - misses_outside, len(outside)), 4)}
 
 def misses(rows: Sequence[Row], predicted: Sequence[str], limit: int) -> list[dict[str, Any]]:
   wrong = [(p, r) for p, r in zip(predicted, rows) if p != r["output"]][:limit]

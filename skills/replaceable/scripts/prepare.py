@@ -1,8 +1,10 @@
 # turn one raw log into the layout the other scripts expect
 # usage: python3 scripts/prepare.py raw_log.jsonl [--schema schema.json] [--extraction-step] [--drop FIELD]... [--max-rows N]
 # NOTE: input is JSONL, one logged case per line, with the typed input under `typed_input` (or `input`) and the loop's answer under
-# `output`; `ts` (any sortable timestamp) and `case_id` are optional. It writes logs/early.jsonl (the earliest half, which the rule is
-# fitted on), logs/heldout.jsonl (the latest half: only the replay reads it, and a host should move it out of the agent's reach),
+# `output`; `ts` (any sortable timestamp), `case_id` and `correct` (true/false: was this run right, from a human override or a check) are
+# optional. With `correct` on every line, the runs before the loop held 95% are set aside as its learning phase and the rest is the log (a loop that
+# never holds 95%: its latest half). It writes logs/early.jsonl (the earliest half, which the rule is fitted on), logs/heldout.jsonl (the latest
+# half: only the replay reads it, and a host should move it out of the agent's reach),
 # schema.json (inferred unless --schema is given), Types.lean and metadata.json. How a field is typed (every change is listed in `notes`):
 # - whole numbers become `nat`; decimals with up to MAX_DECIMALS places are scaled to whole numbers (12.50 -> 1250, `scale` in the schema);
 #   a field with negative values is split into its magnitude and a `<name>_negative` flag
@@ -148,16 +150,48 @@ def main():
     typed = raw.get("typed_input", raw.get("input")) if isinstance(raw, dict) else None
     if not isinstance(typed, dict) or "output" not in raw:
       fail(f"line {n + 1} needs `typed_input` (an object of fields) and `output`; JSON lines only: a CSV or JSON array has to be converted first")
-    for key in set(raw) - {"case_id", "ts", "typed_input", "input", "output"} - stats.TOKEN_KEYS: other.setdefault(key, raw[key])
+    if not isinstance(raw.get("correct", True), bool): fail(f"line {n + 1}: `correct` must be true or false, not {json.dumps(raw['correct'])}")
+    for key in set(raw) - {"case_id", "ts", "correct", "typed_input", "input", "output"} - stats.TOKEN_KEYS: other.setdefault(key, raw[key])
     tokens = stats.row_tokens(raw)  # NOTE: kept next to the typed input, never inside it: a token count must not become a rule input
     rows.append({"case_id": str(raw.get("case_id", f"c{n:05d}")), "ts": raw.get("ts", n), "typed_input": typed, "output": raw["output"],
-                 **({} if tokens is None else {"tokens": tokens})})
+                 **({} if tokens is None else {"tokens": tokens}), **({"correct": raw["correct"]} if "correct" in raw else {})})
   if not rows: fail("the log is empty")
+  if 0 < sum("correct" in r for r in rows) < len(rows): fail("`correct` is on some lines but not on all: give every run its feedback, or none")
   rows.sort(key=lambda r: (str(r["ts"]) if not isinstance(r["ts"], (int, float)) else f"{r['ts']:020.6f}", r["case_id"]))
   notes: list[str] = []
+  learning = None
+  if len(rows) >= stats.MIN_TAIL and all("correct" in r for r in rows):  # NOTE: the loop's own feedback, read on the whole log
+    correct = [r["correct"] for r in rows]
+    steady = stats.steady_from(correct)  # from here on one and the same policy was scored, as far as the feedback can tell
+    tail = correct[steady:]
+    accuracy = sum(tail) / len(tail)
+    before = correct[max(0, steady - len(tail)):steady]
+    learning = {"converged": accuracy >= stats.PLATEAU, "runs": len(rows), "accuracy": round(accuracy, 3), "curve": stats.curve(rows)}
+    slope = stats.drifting(tail)
+    if slope:  # NOTE: still climbing or sinking across the steady stretch: the policy is still being changed
+      learning["unsettled"] = {"recent": round(slope[1], 3), "before": round(slope[0], 3), "runs": len(tail), "drift": True}
+      notes.append(f"the loop's feedback is still moving ({slope[0]:.0%} early in its last {len(tail)} runs, {slope[1]:.0%} at the end)")
+    elif accuracy >= stats.PLATEAU and len(tail) >= stats.MIN_TAIL:
+      if steady and sum(correct[:steady]) / steady >= stats.PLATEAU: steady = 0  # a dip in a loop that was right all along is not a learning phase
+      if steady:
+        learning |= {"from_run": steady, "accuracy_before": round(sum(correct[:steady]) / steady, 3)}
+        learning["tokens"] = stats.token_stats(rows[:steady])
+        notes.append(f"the loop held 95% accuracy after run {steady} of {len(rows)}: those {steady} runs are its learning phase, the rest is checked")
+    elif accuracy < stats.PLATEAU and (len(tail) >= 2 * stats.MIN_TAIL or not steady):  # steady below 95%: examined as it is, it may be a guesser
+      where = f"its steady stretch (from run {steady}) is examined" if steady else "the whole log is examined"
+      notes.append(f"the loop's feedback holds at {accuracy:.0%}, below 95%: {where}")
+    else:  # NOTE: the feedback changed within the last stretch of the log: there is no fixed policy to test yet
+      was = sum(before) / len(before)
+      learning["unsettled"] = {"recent": round(accuracy, 3), "runs": len(tail), "before": round(was, 3)}
+      notes.append(f"the loop's feedback changed {len(tail)} runs before the end of the log ({accuracy:.0%} since, {was:.0%} before): INCONCLUSIVE")
+    if "from_run" not in learning: learning["examined_from"] = steady  # a learning phase is set aside; anything else is examined from here
+    rows = rows[steady:]
   if args.max_rows and len(rows) > args.max_rows:
     notes.append(f"kept the latest {args.max_rows} of {len(rows)} cases (--max-rows)")
     rows = rows[-args.max_rows:]
+    if learning:
+      learning["trimmed"] = True
+      if learning["converged"] and "unsettled" not in learning: learning["accuracy"] = round(sum(r["correct"] for r in rows) / len(rows), 3)
   elif len(rows) > LARGE_LOG:
     notes.append(f"{len(rows)} cases: the fit and the Lean runs may take minutes or time out; --max-rows {LARGE_LOG} keeps the latest {LARGE_LOG}")
 
@@ -179,6 +213,7 @@ def main():
   # NOTE: source material next to the typed fields and nothing says what it is: the audit then asks for the scope
   if args.extraction_step or not other: meta["pipeline"] = {"extraction_step": args.extraction_step}
   else: meta["source_fields"] = {"names": sorted(other), "sample": json.dumps(other[sorted(other)[0]])[:160]}
+  if learning: meta["learning"] = learning
   if stats.token_stats(rows)["with_tokens"]: meta["tokens"] = stats.token_stats(rows)
   else: notes.append("no token count in the log lines (`tokens` or `usage` per case): token use and savings will be reported as unknown")
   Path("metadata.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")

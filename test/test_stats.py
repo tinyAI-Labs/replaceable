@@ -1,5 +1,5 @@
 # the bound, the baseline, the conflict scan and the token counts
-import sys, unittest
+import random, sys, unittest
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "skills" / "replaceable" / "scripts"))
 import stats
@@ -56,6 +56,38 @@ class TestTokens(unittest.TestCase):
     self.assertEqual(stats.token_stats([{"tokens": t} for t in range(1, 11)] + [{}]),
                      {"cases": 11, "with_tokens": 10, "total": 55, "mean": 5.5, "median": 5.5, "p90": 9})
     self.assertEqual(stats.token_stats([{}, {}]), {"cases": 2, "with_tokens": 0})
+
+class TestSteadyFrom(unittest.TestCase):  # where a loop's feedback becomes steady: the tail after its latest change
+  ramp = [i % 5 >= 2 for i in range(300)]  # 60% right while it learns
+  def test_a_loop_that_learns_and_holds_is_cut_after_its_learning_phase(self):
+    log = self.ramp + [True] * 700
+    start = stats.steady_from(log)
+    self.assertTrue(300 <= start <= 600, start)  # it may give up a few clean runs after the change, never keep an old one
+    self.assertTrue(all(log[start:]))
+  def test_a_loop_that_never_changed_is_steady_from_the_start(self):
+    self.assertEqual(stats.steady_from([True] * 500), 0)
+    self.assertEqual(stats.steady_from([i % 5 != 0 for i in range(2000)]), 0)  # 80% throughout
+  def test_a_fix_in_the_last_runs_of_a_long_log_is_seen(self):
+    log = [i % 25 < 23 for i in range(5750)] + [True] * 250  # 92% for 5750 runs, then 250 clean ones
+    start = stats.steady_from(log)
+    self.assertTrue(5750 <= start <= 5900, start)
+  def test_a_dip_at_the_end_leaves_only_the_dip(self):
+    self.assertGreaterEqual(stats.steady_from([True] * 3000 + [False] * 60), 2900)
+  def test_noise_alone_rarely_looks_like_a_change(self):
+    rng = random.Random(7)  # 200 flat loops at 81%
+    changed = sum(stats.steady_from([rng.random() < 0.81 for _ in range(3000)]) > 0 for _ in range(200))
+    self.assertLess(changed, 20)
+
+class TestDrifting(unittest.TestCase):  # a slow slope inside a steady stretch
+  def test_a_slow_steady_rise_is_a_drift(self):
+    log = [(j * 7919) % 750 >= wrong for wrong in (129, 101, 83, 67) for j in range(750)]  # 82.8%, 86.5%, 88.9%, 91.1%, wrong runs scattered
+    self.assertEqual(stats.steady_from(log), 0)  # no step for the scan to find
+    first, last = stats.drifting(log)
+    self.assertLess(first, 0.86)
+    self.assertGreater(last, 0.89)
+  def test_a_flat_loop_and_a_short_log_do_not_drift(self):
+    self.assertIsNone(stats.drifting([i % 5 != 0 for i in range(3000)]))
+    self.assertIsNone(stats.drifting([True] * 100 + [False] * 40))  # too short to split in thirds of 50
 
 class TestRunsPerDay(unittest.TestCase):  # the pace a token count is extrapolated at: only real timestamps say how long the log took
   def rows(self, *ts): return [{"case_id": f"c{i}", "ts": t} for i, t in enumerate(ts)]
