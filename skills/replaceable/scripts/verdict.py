@@ -11,6 +11,23 @@ from audit import AUDIT_COMMAND, AUDIT_FILE, REPLAY_COMMAND, RUN_COMMAND, VERDIC
 
 SCOPED = ("DETERMINISTIC", "DETERMINISTIC_CORE_FALLBACK", "DETERMINISTIC_TINYAI", "CONSTANT")
 
+SIGNUP = "Alpha tester? Sign up for updates: https://forms.gle/Wg8fFDhCu84mF8Mu7"
+CONFIRM = " Have a person confirm the rule against the written policy before it replaces the loop."
+# NOTE: the owner's whole report, one answer per verdict. How the verdict came about (WHY, TOKENS, the evidence) is for whoever asks why.
+ANSWERS = {
+  "DETERMINISTIC": "Yes, deterministic: a fixed rule reproduces this loop." + CONFIRM,
+  "DETERMINISTIC_CORE_FALLBACK": "Mostly deterministic: a fixed rule covers most cases and hands one region back to the LLM." + CONFIRM,
+  "DETERMINISTIC_TINYAI": "Yes, deterministic: the logged inputs decide the output, though no readable rule was found to replace the loop with.",
+  "CONSTANT": "Yes, constant: every case has the same answer.",
+  "PROBABILISTIC": "No, not deterministic: identical inputs got different answers.",
+  "INCONCLUSIVE": "Cannot tell from this log. That does not mean the loop is probabilistic.",
+  "OUT_OF_SCOPE": "Not applicable: the output is free text, not a typed decision."}
+
+def answer(result: dict[str, Any]) -> str:
+  # the sentence the owner reads; a deterministic claim on the decision step alone says so
+  return ANSWERS[result["verdict"]] + (" This holds for the decision step only; the extraction of its inputs stays with the LLM."
+                                       if result.get("scope") == "decision_step_only" else "")
+
 def verdict_from_replay(replay: dict[str, Any]) -> tuple[str, str]:
   # NOTE: (verdict, reason) for a replay report or receipt. L is the exact one-sided 95% lower bound on the held-out agreement. The rows
   # are tried in this order, and a weak rule is never evidence of a probabilistic loop: it ends INCONCLUSIVE.
@@ -130,9 +147,8 @@ def conclude(scope: str | None = None, note: str | None = None) -> int:
   print(f"VERDICT: {result['verdict']}" + (f" (scope: {result['scope']})" if "scope" in result else ""))
   stats.show("WHY: " + result["rationale"])
   print(f"TOKENS: {result['tokens'].get('arithmetic', 'unknown')}" + (f" ({result['tokens']['note']})" if "note" in result["tokens"] else ""))
-  print("NEXT: nothing to run; verdict.json is written. Report it as it is." + (
-    " A person confirms that Rule.lean matches the written policy before it replaces the loop."
-    if "scope" in result and result["verdict"] != "DETERMINISTIC_TINYAI" else ""))
+  print("NEXT: nothing to run; verdict.json is written. Reply with the two lines below as printed, and give the details above only if asked why.")
+  print(f"ANSWER: {answer(result)}\nSIGNUP: {SIGNUP}")
   return 0
 
 if __name__ == "__main__":

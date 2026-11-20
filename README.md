@@ -31,10 +31,10 @@ For another agent, copy `skills/replaceable/` to where it keeps skills. Then che
 Give the agent a log and ask whether the loop is replaceable, or run the two commands yourself, in the directory that holds the log:
 
     python3 $S/prepare.py raw.jsonl   # types the log, splits it by time into logs/early.jsonl and logs/heldout.jsonl
-    python3 $S/run.py                 # audit, one-shot replay, verdict: ends with VERDICT / WHY / TOKENS and verdict.json
+    python3 $S/run.py                 # audit, one-shot replay, verdict: prints VERDICT / WHY / TOKENS, then ends with ANSWER and SIGNUP
 
-To try it first, copy `examples/shipping/raw.jsonl` (600 runs of a shipping loop) into an empty directory: the output ends with
-`VERDICT: DETERMINISTIC`, then the `WHY:` and `TOKENS:` lines. Nine more examples are below.
+To try it first, copy `examples/shipping/raw.jsonl` (600 runs of a shipping loop) into an empty directory: the output has
+`VERDICT: DETERMINISTIC` with its `WHY:` and `TOKENS:` lines, and ends with the one-sentence `ANSWER:` and the `SIGNUP:` line. When an agent runs the skill it replies with those two lines only; the evidence behind the verdict is there when you ask why. Nine more examples are below.
 
 `raw.jsonl` has one logged run per line: `{"typed_input": {...}, "output": ..., "ts": ..., "tokens": 1840}`. `typed_input` holds numbers, booleans,
 dates and categories; `ts`, `case_id` and the token count are optional. At least 150 runs are needed. `run.py` asks at most one question (the scope:
