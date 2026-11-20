@@ -8,9 +8,9 @@ def report(n=200, k=200, base=0.5, constant=False, low=None, **more):
   low = round(stats.clopper_pearson_lower(k, n), 4) if low is None else low
   return {"n_heldout": n, "n_match": k, "agreement": round(k / n, 4), "lower_bound": low, "baseline": base, "all_outputs_constant": constant, **more}
 
-def model(n=200, k=200, base=0.5, low=None):  # what the tiny model scored on the held-back cases, at the 99% bound
+def model(n=200, k=200, base=0.5, low=None):  # what the learned model scored on the held-back cases, at the 99% bound
   low = round(stats.clopper_pearson_lower(k, n, 0.99), 4) if low is None else low
-  return {"model": {"n": n, "n_match": k, "why": "A tiny model reproduced them.", "baseline": base, "lower_bound": low}}
+  return {"model": {"n": n, "n_match": k, "why": "A learned model reproduced them.", "baseline": base, "lower_bound": low}}
 
 def fallback(inside=40, outside=160, misses_outside=0, bound=0.97):
   return {"fallback": {"inside": inside, "outside": outside, "misses_outside": misses_outside, "outside_lower_bound": bound}}
@@ -37,11 +37,11 @@ class TestVerdictTable(unittest.TestCase):
     for weak in (fallback(outside=59), fallback(inside=0), fallback(bound=0.9499), {}):
       self.assertEqual(self.name(report(low=0.85, **weak)), "INCONCLUSIVE")
     self.assertEqual(self.name(report(low=0.7999, **fallback())), "INCONCLUSIVE")
-  def test_tiny_model(self):  # the model only turns an INCONCLUSIVE into a verdict; every other row is decided without it
+  def test_learned_model(self):  # the model only turns an INCONCLUSIVE into a verdict; every other row is decided without it
     name, why = verdict.verdict_from_replay(report(k=100, **model()))
-    self.assertEqual(name, "DETERMINISTIC_TINYAI")
+    self.assertEqual(name, "DETERMINISTIC_LEARNED")
     self.assertIn("no readable rule", why)
-    self.assertEqual(self.name(report(k=100, **model(low=0.95))), "DETERMINISTIC_TINYAI")
+    self.assertEqual(self.name(report(k=100, **model(low=0.95))), "DETERMINISTIC_LEARNED")
     self.assertEqual(self.name(report(k=100, **model(low=0.9499))), "INCONCLUSIVE")
     self.assertEqual(self.name(report(k=100, **model(low=0.97, base=0.96))), "INCONCLUSIVE")  # no better than always answering the commonest output
     self.assertEqual(self.name(report(n=59, k=40, **model(n=59, k=59))), "INCONCLUSIVE")
@@ -86,10 +86,10 @@ class TestVerdictBuild(unittest.TestCase):
 
 class TestReport(unittest.TestCase):  # the owner reads the answer and the sign-up line; the evidence is printed only for whoever asks why
   def test_every_verdict_has_an_answer(self):
-    self.assertEqual(set(verdict.ANSWERS), {"DETERMINISTIC", "DETERMINISTIC_CORE_FALLBACK", "DETERMINISTIC_TINYAI", "CONSTANT", "PROBABILISTIC",
+    self.assertEqual(set(verdict.ANSWERS), {"DETERMINISTIC", "DETERMINISTIC_CORE_FALLBACK", "DETERMINISTIC_LEARNED", "CONSTANT", "PROBABILISTIC",
                                             "INCONCLUSIVE", "OUT_OF_SCOPE"})
   def test_the_answer_says_yes_no_or_that_it_cannot_tell(self):
-    for name in ("DETERMINISTIC", "DETERMINISTIC_TINYAI", "CONSTANT"): self.assertTrue(verdict.ANSWERS[name].startswith("Yes"), name)
+    for name in ("DETERMINISTIC", "DETERMINISTIC_LEARNED", "CONSTANT"): self.assertTrue(verdict.ANSWERS[name].startswith("Yes"), name)
     self.assertEqual(verdict.ANSWERS["DETERMINISTIC"], "Yes, deterministic.")
     self.assertTrue(verdict.ANSWERS["PROBABILISTIC"].startswith("No"))
     self.assertTrue(verdict.ANSWERS["INCONCLUSIVE"].startswith("Cannot tell"))
@@ -108,7 +108,7 @@ class TestReport(unittest.TestCase):  # the owner reads the answer and the sign-
     ruled = {"triage": {"scope": "full"}, "fit": {"rule_sha256": stats.sha256("rule")}}
     receipt = lambda **more: {"rule_sha256": stats.sha256("rule"), **report(**more)}  # noqa: E731
     exits = lambda name, stage: {"proposed": {"verdict": name, "exit_stage": stage, "why": "w"}, "conflicts": {"example_pairs": [["a", "b"]]}}  # noqa: E731
-    for name, state, held in (("DETERMINISTIC", ruled, receipt()), ("DETERMINISTIC_TINYAI", ruled, receipt(k=100, **model())),
+    for name, state, held in (("DETERMINISTIC", ruled, receipt()), ("DETERMINISTIC_LEARNED", ruled, receipt(k=100, **model())),
                               ("INCONCLUSIVE", ruled, receipt(k=100)), ("PROBABILISTIC", exits("PROBABILISTIC", "conflicts"), None),
                               ("OUT_OF_SCOPE", exits("OUT_OF_SCOPE", "triage"), None)):
       self.assertEqual(self.conclusion(state, held), [f"Answer: {verdict.ANSWERS[name]}", verdict.tokens_line({"known": False})], name)

@@ -9,12 +9,12 @@ from stats import BOUND_CORE, BOUND_DETERMINISTIC, MIN_HELDOUT
 from replay import read_receipt
 from audit import AUDIT_COMMAND, AUDIT_FILE, REPLAY_COMMAND, RUN_COMMAND, VERDICT_COMMAND, weak_note
 
-SCOPED = ("DETERMINISTIC", "DETERMINISTIC_CORE_FALLBACK", "DETERMINISTIC_TINYAI", "CONSTANT")
+SCOPED = ("DETERMINISTIC", "DETERMINISTIC_CORE_FALLBACK", "DETERMINISTIC_LEARNED", "CONSTANT")
 
 ASK = "Do you want to reduce your token spend for this agentic loop to zero? Find out how: https://tinyailabs.com/"
 # NOTE: the owner's whole report is two lines: one answer per verdict and what the loop spends. How the verdict came about is printed only on --why.
 ANSWERS = {
-  "DETERMINISTIC": "Yes, deterministic.", "DETERMINISTIC_CORE_FALLBACK": "Mostly deterministic.", "DETERMINISTIC_TINYAI": "Yes, deterministic.",
+  "DETERMINISTIC": "Yes, deterministic.", "DETERMINISTIC_CORE_FALLBACK": "Mostly deterministic.", "DETERMINISTIC_LEARNED": "Yes, deterministic.",
   "CONSTANT": "Yes, constant.", "PROBABILISTIC": "No, not deterministic.", "INCONCLUSIVE": "Cannot tell from this log.",
   "OUT_OF_SCOPE": "Not applicable: the output is free text, not a typed decision."}
 
@@ -45,7 +45,7 @@ def verdict_from_replay(replay: dict[str, Any]) -> tuple[str, str]:
       f"(95% lower bound {fb['outside_lower_bound']}), and {fb['inside']} held-back cases fall inside the region.")
   model = replay.get("model")  # NOTE: last of the passing rows: the model turns an INCONCLUSIVE into a verdict, never one verdict into another
   if model and model["lower_bound"] >= BOUND_DETERMINISTIC and stats.beats_baseline(model["lower_bound"], model["baseline"]):
-    return "DETERMINISTIC_TINYAI", f"{seen}: no readable rule reaches {BOUND_DETERMINISTIC}. {model['why']}"
+    return "DETERMINISTIC_LEARNED", f"{seen}: no readable rule reaches {BOUND_DETERMINISTIC}. {model['why']}"
   if low >= BOUND_CORE:
     why = "no fallback region was declared" if not fb else (
       f"the fallback region does not contain the misses ({fb['misses_outside']} misses in the {fb['outside']} cases outside it, "
@@ -151,7 +151,7 @@ def conclude(scope: str | None = None, note: str | None = None, why: bool = Fals
     print(f"TOKENS: {result['tokens'].get('arithmetic', 'unknown')}" + (f" ({result['tokens']['note']})" if "note" in result["tokens"] else ""))
     print("NEXT: nothing to run; verdict.json is written. Report it as it is." + (
       " A person confirms that Rule.lean matches the written policy before it replaces the loop."
-      if "scope" in result and result["verdict"] != "DETERMINISTIC_TINYAI" else ""))
+      if "scope" in result and result["verdict"] != "DETERMINISTIC_LEARNED" else ""))
   print(f"Answer: {ANSWERS[result['verdict']]}\n{tokens_line(result['tokens'], usd)}")
   return 0
 

@@ -5,7 +5,7 @@ import argparse, json, sys
 from pathlib import Path
 from typing import Any, Sequence
 import lean, stats
-try: from tinyai import exam as witness  # optional: without the tinyai/ folder the skill is the rule-only skill
+try: from witness import exam as witness  # optional: without the witness/ folder the skill is the rule-only skill
 except ImportError: witness = None
 
 RECEIPT_RESULT = ("rule_sha256", "n_heldout", "n_match", "agreement", "lower_bound", "baseline", "all_outputs_constant")

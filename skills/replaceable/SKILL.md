@@ -35,10 +35,10 @@ Printed only with `run.py --why`. If the log lines carry a token count per loop 
 | Replay: all outputs equal, L >= 0.95 | CONSTANT |
 | Replay: L >= 0.95 and 1 - L at most half of 1 - baseline | DETERMINISTIC |
 | Replay: L >= 0.80, a declared `fallback` region, 60+ held-back cases outside it with bound >= 0.95 there | DETERMINISTIC_CORE_FALLBACK |
-| Otherwise, if the optional tiny model (`scripts/tinyai/`, trained on the early half, discarded) reproduced the held-back cases with a 99% bound >= 0.95 and 1 - bound at most half of 1 - baseline | DETERMINISTIC_TINYAI |
+| Otherwise, if the optional learned model (`scripts/witness/`, trained on the early half, discarded) reproduced the held-back cases with a 99% bound >= 0.95 and 1 - bound at most half of 1 - baseline | DETERMINISTIC_LEARNED |
 | Anything else | INCONCLUSIVE |
 
-`DETERMINISTIC_TINYAI` means the typed fields decide the output and no readable rule was found: report it as that, and never offer the model as a replacement (it is gone after the exam). L is the exact one-sided 95% lower bound on held-out agreement; baseline is the share of the most common held-out output; `fallback` is the region the rule hands back to the LLM.
+`DETERMINISTIC_LEARNED` means the typed fields decide the output and no readable rule was found: report it as that, and never offer the model as a replacement (it is gone after the exam). L is the exact one-sided 95% lower bound on held-out agreement; baseline is the share of the most common held-out output; `fallback` is the region the rule hands back to the LLM.
 
 ## For the host
 The held-back half must stay unseen. The scripts refuse it as a fitting log and allow one replay, but cannot stop an agent that reads files. A host that can should keep `logs/heldout.jsonl` out of the agent's reach: `run.py` then leaves `work/replay_request.json` and the host answers it with `python3 ${CLAUDE_SKILL_DIR}/scripts/host_replay.py --heldout <file> --workdir <agent directory>`.
