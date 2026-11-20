@@ -57,6 +57,18 @@ class TestTokens(unittest.TestCase):
                      {"cases": 11, "with_tokens": 10, "total": 55, "mean": 5.5, "median": 5.5, "p90": 9})
     self.assertEqual(stats.token_stats([{}, {}]), {"cases": 2, "with_tokens": 0})
 
+class TestConvergedFrom(unittest.TestCase):  # where a self-optimizing loop settles: the run from which the log is the policy to be replaced
+  ramp = [i % 5 >= 2 for i in range(300)]  # 60% right while it learns
+  def test_a_loop_that_learns_and_holds_is_converged_from_the_first_clean_block_after_the_last_dip(self):
+    self.assertEqual(stats.converged_from(self.ramp + [True] * 700), 400)  # block 300-400 is clean; the block at the edge is left out too
+    self.assertEqual(stats.converged_from([True] * 300 + [False] * 100 + [True] * 500), 500)  # a later dip moves the start behind it
+  def test_a_loop_that_was_always_good_has_no_learning_phase(self):
+    self.assertEqual(stats.converged_from([True] * 500), 0)
+  def test_no_tail_no_convergence(self):
+    self.assertIsNone(stats.converged_from([i % 5 != 0 for i in range(3000)]))  # 80% and flat: it never reaches 95%
+    self.assertIsNone(stats.converged_from([True] * 100))  # too short to tell
+    self.assertIsNone(stats.converged_from([False] * 500 + [True] * 200))  # settled too recently: fewer than 150 runs are left
+
 class TestRunsPerDay(unittest.TestCase):  # the pace a token count is extrapolated at: only real timestamps say how long the log took
   def rows(self, *ts): return [{"case_id": f"c{i}", "ts": t} for i, t in enumerate(ts)]
   def test_iso_timestamps_give_runs_per_day(self):

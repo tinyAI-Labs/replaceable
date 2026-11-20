@@ -1,0 +1,2 @@
+VERDICT: DETERMINISTIC (scope: full)
+Answer: Yes, deterministic. Checked on the runs after the loop reached 95% accuracy (from run 1,400 of 6,000).

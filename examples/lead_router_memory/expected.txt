@@ -1,0 +1,2 @@
+VERDICT: INCONCLUSIVE
+Answer: Cannot tell from this log. Checked on the runs after the loop reached 95% accuracy (from run 600 of 4,000).

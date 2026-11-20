@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib, json, os, sys, zlib
 from datetime import datetime
 from collections import Counter
-from math import ceil, exp, lgamma, log, log1p
+from math import ceil, exp, lgamma, log, log1p, sqrt
 from pathlib import Path
 from statistics import median
 from typing import Any, Sequence
@@ -103,6 +103,21 @@ def token_stats(rows: Sequence[Row]) -> dict[str, Any]:
   if not counts: return {"cases": len(rows), "with_tokens": 0}
   return {"cases": len(rows), "with_tokens": len(counts), "total": sum(counts), "mean": round(sum(counts) / len(counts), 1),
           "median": median(counts), "p90": counts[ceil(0.9 * len(counts)) - 1]}
+
+PLATEAU, WINDOW, MIN_TAIL = 0.95, 100, 150  # a loop has converged when it holds at least 95% over a stretch of at least 150 runs
+
+def converged_from(correct: Sequence[bool]) -> int | None:
+  # the run from which the loop holds its plateau: the plateau is the accuracy of the last quarter of the log (it must reach PLATEAU), and the
+  # tail reaches back over every earlier block of WINDOW runs within four standard errors of a 95% loop (8.7 points) of it, less one block
+  # of margin; None when no tail of MIN_TAIL runs is left
+  n = len(correct)
+  last = max(MIN_TAIL, n // 4)
+  plateau = sum(correct[-last:]) / last if n >= MIN_TAIL else 0.0
+  if plateau < PLATEAU: return None
+  floor, start = plateau - 4 * sqrt(PLATEAU * (1 - PLATEAU) / WINDOW), n
+  while start >= WINDOW and sum(correct[start - WINDOW:start]) >= floor * WINDOW: start -= WINDOW
+  start = start + WINDOW if start >= WINDOW else 0  # the block at the edge may still hold the last corrections
+  return start if n - start >= MIN_TAIL else None
 
 def runs_per_day(rows: Sequence[Row]) -> float | None:
   # the pace a token count is extrapolated at; None unless `ts` are ISO timestamps that span a day (a counter, or no ts, says nothing about time)

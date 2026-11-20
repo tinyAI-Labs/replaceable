@@ -1,0 +1,2 @@
+VERDICT: DETERMINISTIC_CORE_FALLBACK (scope: full)
+Answer: Mostly deterministic. Checked on the runs after the loop reached 95% accuracy (from run 900 of 6,000).

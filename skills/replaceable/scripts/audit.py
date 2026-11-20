@@ -14,7 +14,7 @@ from derive import KINDS, candidates, screen, widen
 from fit import RISING, fit_report, forecast, learning, rank
 
 AUDIT_FILE = stats.WORK_DIR / "audit.json"
-LOG_KEYS = {"case_id", "ts", "typed_input", "output"} | stats.TOKEN_KEYS
+LOG_KEYS = {"case_id", "ts", "correct", "typed_input", "output"} | stats.TOKEN_KEYS
 MAX_DERIVE_RUNS = 2  # audit runs that may offer new --derive expressions; a run whose expressions Lean rejects does not count
 SCORES = ("early_agreement", "cv_agreement")
 
@@ -192,7 +192,9 @@ def audit(log="logs/early.jsonl", heldout="logs/heldout.jsonl", schema="schema.j
     raise SystemExit(1)
   state: dict[str, Any] = {"early_sha256": early_sha, "scope_choice": scope, "derive": kept, "derive_tried": tried, "derive_runs": len(tried),
                            "triage": triage(rows, schema_, stats.read_json(metadata), Path(heldout), n_total, scope),
-                           "tokens": stats.token_stats(rows), "runs_per_day": stats.runs_per_day(rows)}
+                           "tokens": stats.token_stats(rows), "runs_per_day": stats.runs_per_day(rows),
+                           "learning": stats.read_json(metadata).get("learning"),
+                           "log_tokens": stats.read_json(metadata).get("tokens")}
   if "exit" not in state["triage"]: state["conflicts"] = conflicts(rows, schema_)
   if "exit" not in state.get("conflicts", {"exit": 1}):
     lean.require_lean()

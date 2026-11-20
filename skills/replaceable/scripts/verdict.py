@@ -13,10 +13,20 @@ SCOPED = ("DETERMINISTIC", "DETERMINISTIC_CORE_FALLBACK", "DETERMINISTIC_LEARNED
 
 ASK = "Do you want to reduce your token spend for this agentic loop to zero? Find out how: https://tinyailabs.com/"
 # NOTE: the owner's whole report is two lines: one answer per verdict and what the loop spends. How the verdict came about is printed only on --why.
+MIN_PHASE = 30  # runs a phase needs before its token cost is compared with the other's
 ANSWERS = {
   "DETERMINISTIC": "Yes, deterministic.", "DETERMINISTIC_CORE_FALLBACK": "Mostly deterministic.", "CONSTANT": "Yes, constant.",
   "DETERMINISTIC_LEARNED": "Yes, deterministic (no readable rule).", "PROBABILISTIC": "No, not deterministic.",
   "INCONCLUSIVE": "Cannot tell from this log.", "OUT_OF_SCOPE": "Not applicable: the output is free text, not a typed decision."}
+
+def answer_line(result: dict[str, Any]) -> str:
+  # the answer, and when the log came with the loop's own feedback, which part of the log it is about
+  learned, text = result.get("learning"), ANSWERS[result["verdict"]]
+  if learned and learned.get("from_run"):
+    text += f" Checked on the runs after the loop reached 95% accuracy (from run {learned['from_run']:,} of {learned['runs']:,})."
+  elif learned and not learned["converged"]:
+    text += f" The loop never settles at 95% accuracy ({learned['accuracy']:.0%}): this is about a loop that is still learning."
+  return f"Answer: {text}"
 
 def tokens_line(tokens: dict[str, Any], usd: float | None = None, ask: bool = True) -> str:
   # the second line: what the loop spends, from the log's own counts (a price only if given, a pace only if the log has dates), then the question,
@@ -25,6 +35,10 @@ def tokens_line(tokens: dict[str, Any], usd: float | None = None, ask: bool = Tr
   if not tokens["known"]: return f"Tokens: not in this log.{tail}"
   said = f"this loop used {tokens['per_run']:,.0f} per run, {tokens['logged']:,} over its {tokens['cases_with_tokens']:,} logged runs"
   if "per_month" in tokens: said += f", at that pace about {tokens['per_month']:,} a month"
+  learned = tokens.get("learning") or {}
+  if (spent := learned.get("tokens") or {}).get("with_tokens", 0) >= MIN_PHASE and tokens["per_run"]:  # what the buyer's budget leaves out
+    said += (f"; the {learned['from_run']:,} runs before it converged ({learned['accuracy_before']:.0%} accurate) used {spent['mean']:,.0f} per run, "
+             f"{spent['mean'] / tokens['per_run']:.1f}x as much")
   total, span = (tokens["per_month"], "a month") if "per_month" in tokens else (tokens["logged"], "over the logged runs")
   return f"Tokens: {said}" + (f" (about ${total * usd / 1e6:,.2f} {span} at ${usd:g} per million tokens)" if usd else "") + f".{tail}"
 
@@ -107,6 +121,8 @@ def token_block(state: dict[str, Any], receipt: dict[str, Any] | None, verdict: 
   # half from the audit, held-back half as aggregates from the replay receipt); the saving is that mean times the share of runs the rule
   # takes over. No count in the log means unknown: nothing is estimated from text length.
   halves = {name: t for name, t in (("early", state.get("tokens")), ("heldout", (receipt or {}).get("tokens"))) if t and t["with_tokens"]}
+  whole = state.get("log_tokens")
+  if receipt is None and whole and whole["with_tokens"]: halves = {"whole log": whole}  # an early exit: no replay, but the count is known
   if not halves: return {"known": False, "note": "no token count in the log lines; add `tokens` (or `usage`) per case to get token use and savings"}
   n, total, name = sum(t["with_tokens"] for t in halves.values()), sum(t["total"] for t in halves.values()), verdict["verdict"]
   if name in ("DETERMINISTIC", "CONSTANT"): share, why = 1.0, f"{name}: the rule takes over every run"
@@ -117,8 +133,11 @@ def token_block(state: dict[str, Any], receipt: dict[str, Any] | None, verdict: 
   mean = round(total / n, 1)
   block = {"known": True, "per_run": mean, "logged": total, "cases_with_tokens": n, "halves": halves, "rule_share": share,
            "saved_per_run": round(share * mean, 1), "saved_logged": round(share * total)}
+  if learned := state.get("learning"):  # the loop, seen from the runs before it converged
+    block["learning"] = {k: learned[k] for k in ("runs", "from_run", "accuracy_before") if k in learned} | {"tokens": learned.get("tokens")}
   if state.get("runs_per_day"): block["per_month"] = round(mean * state["runs_per_day"] * 30)  # at the pace of the early half of the log
-  block["arithmetic"] = (f"{total} tokens / {n} runs with a count ({' + '.join(halves)} half) = {mean} per run; rule share {share} ({why}); saved "
+  where = "the whole log" if "whole log" in halves else " + ".join(halves) + " half"
+  block["arithmetic"] = (f"{total} tokens / {n} runs with a count ({where}) = {mean} per run; rule share {share} ({why}); saved "
                          f"per run = {share} x {mean} = {block['saved_per_run']}; saved over the log = {share} x {total} = {block['saved_logged']}")
   if share and verdict.get("scope") == "decision_step_only":
     block["note"] = "upper bound: the extraction step stays with the LLM, and the log does not split its tokens from the decision step's"
@@ -133,6 +152,7 @@ def write(scope: str | None = None, note: str | None = None, rule="Rule.lean", o
   if note: verdict["rationale"] += f" Note: {note}"
   verdict["completed_by"] = completed_by(state)
   verdict["tokens"] = token_block(state, receipt, verdict)
+  if state.get("learning"): verdict["learning"] = {k: v for k, v in state["learning"].items() if k != "tokens"}
   stats.write_text_atomic(Path(out), json.dumps(verdict, indent=2))
   return verdict
 
@@ -154,7 +174,7 @@ def conclude(scope: str | None = None, note: str | None = None, why: bool = Fals
     print("NEXT: nothing to run; verdict.json is written. Report it as it is." + (
       " A person confirms that Rule.lean matches the written policy before it replaces the loop."
       if "scope" in result and result["verdict"] != "DETERMINISTIC_LEARNED" else ""))
-  print(f"Answer: {ANSWERS[result['verdict']]}\n{tokens_line(result['tokens'], usd, result['verdict'] in SCOPED)}")
+  print(f"{answer_line(result)}\n{tokens_line(result['tokens'], usd, result['verdict'] in SCOPED)}")
   return 0
 
 if __name__ == "__main__":

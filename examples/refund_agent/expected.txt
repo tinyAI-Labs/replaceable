@@ -1,0 +1,2 @@
+VERDICT: PROBABILISTIC
+Answer: No, not deterministic. The loop never settles at 95% accuracy (76%): this is about a loop that is still learning.

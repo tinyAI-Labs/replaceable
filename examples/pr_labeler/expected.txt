@@ -1,0 +1,2 @@
+VERDICT: DETERMINISTIC_LEARNED (scope: full)
+Answer: Yes, deterministic (no readable rule). Checked on the runs after the loop reached 95% accuracy (from run 1,100 of 5,000).

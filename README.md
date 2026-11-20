@@ -33,32 +33,29 @@ Give the agent a log and ask whether the loop is replaceable, or run the two com
     python3 $S/prepare.py raw.jsonl   # types the log, splits it by time into logs/early.jsonl and logs/heldout.jsonl
     python3 $S/run.py                 # audit, one-shot replay, verdict: ends with an Answer and a Tokens line (add --why for VERDICT / WHY / TOKENS)
 
-To try it first, copy `examples/shipping/raw.jsonl` (600 runs of a shipping loop) into an empty directory: the output ends with
-`Answer: Yes, deterministic.` and a `Tokens:` line with what the loop spends. Add `--why` to `run.py` (it resumes, nothing is replayed again) to also see the `VERDICT:`, `WHY:` and `TOKENS:` lines; an agent running the skill prints them only if you ask why. Nine more examples are below.
+To try it first, copy `examples/ticket_triage/raw.jsonl` (6,000 runs of a support-ticket router that learned its routing from corrections) into an empty directory: the
+output ends with `Answer: Yes, deterministic. Checked on the runs after the loop reached 95% accuracy ...` and a `Tokens:` line with what the loop spends, now and while it was learning. Add `--why` to `run.py` (it resumes, nothing is replayed again) to also see the `VERDICT:`, `WHY:` and `TOKENS:` lines; an agent running the skill prints them only if you ask why. Four more examples are below.
 
-`raw.jsonl` has one logged run per line: `{"typed_input": {...}, "output": ..., "ts": ..., "tokens": 1840}`. `typed_input` holds numbers, booleans,
-dates and categories; `ts`, `case_id` and the token count are optional. At least 150 runs are needed. `run.py` asks at most one question (the scope:
+`raw.jsonl` has one logged run per line: `{"typed_input": {...}, "output": ..., "ts": ..., "tokens": 1840, "correct": true}`. `typed_input` holds numbers,
+booleans, dates and categories; `ts`, `case_id`, the token count and `correct` are optional. At least 150 runs are needed. `run.py` asks at most one question (the scope:
 were the typed fields extracted from documents by the loop itself?) and prints the exact command to answer it. `Rule.lean` is always the
 rule the solver fitted: `run.py` overwrites an edited one before the exam, and an edit after the exam turns the verdict INCONCLUSIVE.
 
 ## Examples
-Ten synthetic loops with a known answer, in `examples/<name>/raw.jsonl`. Run any of them as above, or all of them with `sh examples/check.sh`.
+Five synthetic loops of the kind a company runs, in `examples/<name>/raw.jsonl`: each starts around 60% right and corrects itself from feedback (a human
+override, a check) until it is right at least 95% of the time, or does not get there. Run any of them as above, or all of them with `sh examples/check.sh`.
 
 | example | the loop | verdict |
 |---|---|---|
-| `shipping` | picks a shipping method from weight, distance, zone and express | DETERMINISTIC |
-| `loan_ratio` | approves when debt is at most 35% of income: a ratio of two fields | DETERMINISTIC |
-| `noisy_rule` | a clear score rule that the LLM gets wrong 1% of the time: a rule still beats it | DETERMINISTIC |
-| `fallback_region` | a rule everywhere, except big accounts where a person decides case by case | DETERMINISTIC_CORE_FALLBACK |
-| `constant` | always the same answer | CONSTANT |
-| `lead_scoring_llm` | the same inputs get different answers: the LLM is guessing | PROBABILISTIC |
-| `mostly_rule` | review sentiment: only 3-star reviews are a judgement call | PROBABILISTIC (it names the inputs that disagree) |
-| `moderation_hidden_text` | decided on a text that is not among the logged fields | INCONCLUSIVE |
-| `many_branch_policy` | a real rule, with its own limit per region and tier: too many branches to read, a learned model reproduces it | DETERMINISTIC_LEARNED |
-| `chatbot_reply` | free-text answers, not a classification | OUT_OF_SCOPE |
+| `ticket_triage` | routes support tickets to a queue; one routing note per category, learned from corrections; enterprise urgent tickets escalate | DETERMINISTIC, once it has converged |
+| `expense_approval` | approves or escalates by a limit for each department, learned from reviewer overrides; a person decides the big amounts case by case | DETERMINISTIC_CORE_FALLBACK |
+| `pr_labeler` | labels pull requests small, medium or large with its own limits for each area and author type: too many branches to read, a learned model reproduces it | DETERMINISTIC_LEARNED |
+| `refund_agent` | improves but plateaus near 80%: the same inputs still get different answers | PROBABILISTIC (it never settles at 95%) |
+| `lead_router_memory` | reaches 95% by keeping notes on each rep's load, which the log does not carry: enterprise leads go to either rep | INCONCLUSIVE (hidden state) |
 
-Two things to try. Flip 15% of the outputs in `noisy_rule`: it becomes PROBABILISTIC, because identical inputs now disagree. Delete the `debt` field
-from every line of `loan_ratio`: it becomes INCONCLUSIVE, because the input that decides is no longer logged.
+Each answer says from which run the loop held 95%, and the `Tokens:` line says what the runs before that cost compared with the converged loop.
+Two things to try. Delete the `correct` field from every line of `ticket_triage`: the exam then runs on the whole log, the learning phase is mixed in,
+and the loop no longer looks deterministic. Delete `arr` from `lead_router_memory`: it stays INCONCLUSIVE, because the input that decides was never the one logged.
 
 ## Your own log
 One JSON object per line (JSONL); a JSON array or a CSV has to be converted first. Each line is one run of the loop: the typed fields the decision
@@ -72,11 +69,16 @@ was made from, and the decision. From a trace or message-list export, roughly:
           "typed_input": {"amount_cents": round(args["amount"] * 100), "country": args["country"], "is_member": args["member"]},
           "output": run["messages"][-1]["content"].strip(),  # the decision, one of a fixed set of values
           "ts": run["started_at"],                           # orders the split; without it, file order
-          "tokens": run["usage"]["total_tokens"]}) + "\n")  # optional, for the TOKENS line
+          "tokens": run["usage"]["total_tokens"],            # optional, for the Tokens line
+          "correct": run["feedback"]["passed"]}) + "\n")   # optional: was this run right, per the human override or the check
 
 - Fields are numbers, booleans, dates (`2024-03-21`) and categories. `prepare.py` stops at anything else (free text, identifiers, nested data) and
   names the field: convert it (money to whole cents, text to a category) or leave it out with `--drop FIELD`. Drop what the policy cannot depend on.
-- At least 150 runs; a policy with many branches needs about 1000 or more before a rule can pass, and about 2000 for the learned check.
+- At least 150 runs (after the learning phase, if the log has one); a policy with many branches needs about 1000 or more before a rule can pass, and about 2000 for the learned check.
+- `correct` is the loop's own feedback on a run: a human override, a test, an eval score turned into pass or fail, as tracing tools record it. With it on
+  every line, the skill sets aside the runs before the loop held 95% (its learning phase), examines the rest, and reports what the learning phase cost
+  per run against the converged loop. A loop that never holds 95% is examined as a whole log. Without `correct`, the whole log is examined and a loop that
+  is still learning looks like one that drifted (`INCONCLUSIVE`).
 
 ## Tokens and savings
 Log a token count per run as `tokens` (the run's total), or as the SDKs report it: `usage.input_tokens` + `usage.output_tokens` (cache tokens are
@@ -102,7 +104,7 @@ Delete `scripts/witness/` and the skill is the rule-only skill. It needs large l
     skills/replaceable/SKILL.md          the procedure the agent follows, the hard rules, the verdict table
     skills/replaceable/scripts/          prepare, run (= audit + replay + verdict), host_replay, selftest; fit, derive, thresholds, lean, stats
     skills/replaceable/scripts/witness/   the optional learned check: boost (the learner) and exam (train, score once, keep the numbers)
-    examples/                            ten logs with a known answer, each with the verdict it must end in; check.sh runs them all
+    examples/                            five loops with a known answer, each with the verdict it must end in; check.sh runs them all
     test/                                unit tests that need no Lean: bound, verdict table, rule scan, solver, typing, tokens
     sz.py                                the line budget (code lines by `tokenize`, gate in MAX_LINE_COUNT)
 

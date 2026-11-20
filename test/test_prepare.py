@@ -1,5 +1,5 @@
 # how a raw log is typed: numbers, dates, enums, names, and what must stop the run
-import subprocess, sys, tempfile, unittest
+import json, subprocess, sys, tempfile, unittest
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "skills" / "replaceable" / "scripts"))
 import prepare
@@ -46,6 +46,22 @@ class TestPrepareTyping(unittest.TestCase):
     self.assertEqual(prepare.infer(free_text, set())[0]["output"]["values"], [])
 
 if __name__ == "__main__": unittest.main()
+
+class TestPrepareLearning(unittest.TestCase):  # `correct` on every run sets the learning phase aside
+  def test_the_runs_before_convergence_are_not_the_log(self):
+    rows = [{"case_id": f"r{i:03d}", "ts": i, "tokens": 800 if i < 300 else 100, "typed_input": {"n": i % 7}, "output": "a" if i % 7 < 3 else "b",
+             "correct": i % 5 >= 2 if i < 300 else True} for i in range(700)]
+    with tempfile.TemporaryDirectory() as tmp:
+      (Path(tmp) / "raw.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+      subprocess.run([sys.executable, str(Path(prepare.__file__)), "raw.jsonl"], cwd=tmp, capture_output=True, text=True, check=True)
+      meta, schema = (json.loads((Path(tmp) / name).read_text()) for name in ("metadata.json", "schema.json"))
+      kept = [json.loads(line) for name in ("early", "heldout") for line in (Path(tmp) / "logs" / f"{name}.jsonl").read_text().splitlines()]
+    self.assertEqual((meta["n_total"], meta["n_early"], meta["n_heldout"]), (300, 150, 150))
+    self.assertEqual((meta["learning"]["converged"], meta["learning"]["from_run"], meta["learning"]["runs"]), (True, 400, 700))
+    self.assertEqual(meta["learning"]["tokens"]["mean"], round((300 * 800 + 100 * 100) / 400, 1))  # the runs set aside keep their cost
+    self.assertEqual(meta["tokens"]["mean"], 100)
+    self.assertEqual({r["case_id"] for r in kept}, {f"r{i:03d}" for i in range(400, 700)})
+    self.assertEqual([f["name"] for f in schema["input"]], ["n"])  # feedback is never an input of the rule
 
 class TestPrepareInput(unittest.TestCase):  # a log that is not JSON lines must be told so, not crash
   def run_on(self, text):

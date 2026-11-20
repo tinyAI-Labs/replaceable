@@ -1,1 +1,0 @@
-VERDICT: DETERMINISTIC_LEARNED (scope: full)
