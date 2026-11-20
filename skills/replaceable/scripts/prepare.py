@@ -166,7 +166,7 @@ def main():
     tail = correct[steady:]
     accuracy = sum(tail) / len(tail)
     before = correct[max(0, steady - len(tail)):steady]
-    learning = {"converged": accuracy >= stats.PLATEAU, "runs": len(rows), "accuracy": round(accuracy, 3)}
+    learning = {"converged": accuracy >= stats.PLATEAU, "runs": len(rows), "accuracy": round(accuracy, 3), "curve": stats.curve(rows)}
     slope = stats.drifting(tail)
     if slope:  # NOTE: still climbing or sinking across the steady stretch: the policy is still being changed
       learning["unsettled"] = {"recent": round(slope[1], 3), "before": round(slope[0], 3), "runs": len(tail), "drift": True}

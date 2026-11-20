@@ -104,7 +104,7 @@ class TestReport(unittest.TestCase):  # the owner reads the answer and the token
       out = io.StringIO()
       with contextlib.redirect_stdout(out): verdict.conclude(**kwargs)
       return out.getvalue().splitlines()
-  def test_every_verdict_prints_the_answer_and_the_tokens_line_and_nothing_else(self):
+  def test_every_verdict_prints_the_header_the_answer_the_tokens_line_and_where_the_report_is(self):
     ruled = {"triage": {"scope": "full"}, "fit": {"rule_sha256": stats.sha256("rule")}}
     receipt = lambda **more: {"rule_sha256": stats.sha256("rule"), **report(**more)}  # noqa: E731
     exits = lambda name, stage: {"proposed": {"verdict": name, "exit_stage": stage, "why": "w"}, "conflicts": {"example_pairs": [["a", "b"]]}}  # noqa: E731
@@ -112,9 +112,11 @@ class TestReport(unittest.TestCase):  # the owner reads the answer and the token
                               ("INCONCLUSIVE", ruled, receipt(k=100)), ("PROBABILISTIC", exits("PROBABILISTIC", "conflicts"), None),
                               ("OUT_OF_SCOPE", exits("OUT_OF_SCOPE", "triage"), None)):
       tokens = verdict.tokens_line({"known": False}, ask=name in verdict.SCOPED)
-      self.assertEqual(self.conclusion(state, held), [f"Answer: {verdict.ANSWERS[name]}", tokens], name)
-      why = self.conclusion(state, held, why=True)  # asked why: the verdict, reasons and tokens come first; the answer and tokens lines still end it
-      self.assertEqual(why[-2:], [f"Answer: {verdict.ANSWERS[name]}", tokens], name)
+      shown = self.conclusion(state, held)
+      self.assertEqual(shown[1:3], [f"Answer: {verdict.ANSWERS[name]}", tokens], name)
+      self.assertTrue(shown[0].startswith(f"replaceable · {name}") and shown[3].startswith("Full report: report.html"), name)
+      why = self.conclusion(state, held, why=True)  # asked why: the verdict, reasons and tokens come first; the compact block still ends it
+      self.assertEqual(why[-3:-1], [f"Answer: {verdict.ANSWERS[name]}", tokens], name)
       self.assertTrue(any(line.startswith(f"VERDICT: {name}") for line in why) and any(line.startswith("WHY:") for line in why), name)
   def test_only_a_loop_that_could_be_replaced_is_asked_about_its_spend(self):
     for name in verdict.ANSWERS:
@@ -194,7 +196,7 @@ class TestReport(unittest.TestCase):  # the owner reads the answer and the token
     ruled = {"triage": {"scope": "full"}, "fit": {"rule_sha256": stats.sha256("rule")}, "tokens": stats.token_stats([{"tokens": 1000}] * 100),
              "runs_per_day": 10.0}
     held = {"rule_sha256": stats.sha256("rule"), "tokens": stats.token_stats([{"tokens": 1200}] * 100), **report()}
-    line = self.conclusion(ruled, held, usd=2)[-1]
+    line = self.conclusion(ruled, held, usd=2)[-2]
     self.assertIn("1,100 per run, 220,000 over its 200 logged runs", line)
     self.assertIn("at that pace about 330,000 a month (about $0.66 a month at $2 per million tokens)", line)
 

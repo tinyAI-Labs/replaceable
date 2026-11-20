@@ -40,6 +40,13 @@ def answer_line(result: dict[str, Any]) -> str:
   if learned and learned.get("trimmed"): text += " (--max-rows: only its latest runs.)"
   return f"Answer: {text}"
 
+def learning_cost(tokens: dict[str, Any]) -> tuple[float, float] | None:
+  # (tokens per run in the learning phase, how many times the converged loop's cost) once both phases are long enough to compare
+  spent = (tokens.get("learning") or {}).get("tokens") or {}
+  if spent.get("with_tokens", 0) >= MIN_PHASE and tokens["cases_with_tokens"] >= MIN_PHASE and tokens["per_run"]:
+    return spent["mean"], spent["mean"] / tokens["per_run"]
+  return None
+
 def tokens_line(tokens: dict[str, Any], usd: float | None = None, ask: bool = True) -> str:
   # the second line: what the loop spends, from the log's own counts (a price only if given, a pace only if the log has dates), then the question,
   # asked only of a loop that could be replaced
@@ -50,11 +57,9 @@ def tokens_line(tokens: dict[str, Any], usd: float | None = None, ask: bool = Tr
           else "runs in its steady stretch" if learned.get("examined_from") else "logged runs")
   said = f"this loop used {tokens['per_run']:,.0f} per run, {tokens['logged']:,} over its {tokens['cases_with_tokens']:,} {runs}"
   if "per_month" in tokens: said += f", at that pace about {tokens['per_month']:,} a month"
-  spent = learned.get("tokens") or {}  # what a budget made from the converged cost leaves out, once both phases are long enough to compare
-  if spent.get("with_tokens", 0) >= MIN_PHASE and tokens["cases_with_tokens"] >= MIN_PHASE and tokens["per_run"]:
-    was = pct(learned["accuracy_before"])
-    said += (f"; the {learned['from_run']:,} runs before it converged ({was} accurate) used {spent['mean']:,.0f} per run, "
-             f"{spent['mean'] / tokens['per_run']:.1f}x as much")
+  if cost := learning_cost(tokens):  # what a budget made from the converged cost leaves out
+    said += (f"; the {learned['from_run']:,} runs before it converged ({pct(learned['accuracy_before'])} accurate) used {cost[0]:,.0f} per run, "
+             f"{cost[1]:.1f}x as much")
   total, span = (tokens["per_month"], "a month") if "per_month" in tokens else (tokens["logged"], "over the logged runs")
   return f"Tokens: {said}" + (f" (about ${total * usd / 1e6:,.2f} {span} at ${usd:g} per million tokens)" if usd else "") + f".{tail}"
 
@@ -195,7 +200,9 @@ def conclude(scope: str | None = None, note: str | None = None, why: bool = Fals
     print("NEXT: nothing to run; verdict.json is written. Report it as it is." + (
       " A person confirms that Rule.lean matches the written policy before it replaces the loop."
       if "scope" in result and result["verdict"] != "DETERMINISTIC_LEARNED" else ""))
-  print(f"{answer_line(result)}\n{tokens_line(result['tokens'], usd, result['verdict'] in SCOPED)}")
+  import report  # here, not on top: report reads this module
+  report.write(result, usd)
+  print(report.terminal(result, usd))
   return 0
 
 if __name__ == "__main__":

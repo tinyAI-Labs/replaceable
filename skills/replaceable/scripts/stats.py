@@ -104,6 +104,12 @@ def token_stats(rows: Sequence[Row]) -> dict[str, Any]:
   return {"cases": len(rows), "with_tokens": len(counts), "total": sum(counts), "mean": round(sum(counts) / len(counts), 1),
           "median": median(counts), "p90": counts[ceil(0.9 * len(counts)) - 1]}
 
+def curve(rows: Sequence[Row], blocks: int = 24) -> list[list[float | None]]:
+  # the loop over time for the report: per equal block of the log, [share of runs right, mean tokens per run (None if the block has no count)]
+  size = max(1, len(rows) // blocks)
+  parts = [rows[i:i + size] for i in range(0, len(rows) - size + 1, size)]
+  return [[round(sum(r["correct"] for r in part) / len(part), 3), token_stats(part).get("mean")] for part in parts]
+
 PLATEAU, MIN_TAIL, SPAN, STEP = 0.95, 150, 300, 50  # holding 95% takes 150+ runs; a change is looked for at every 50th run, over 300-run stretches
 
 def steady_from(correct: Sequence[bool]) -> int:
