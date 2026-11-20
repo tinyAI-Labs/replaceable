@@ -19,6 +19,16 @@ class TestFit(unittest.TestCase):
     report, lean = fit.fit_report(rows(make), schema(*fields))
     self.assertEqual((report["early_agreement"], report["leaves"], report["residual"]), (1.0, 4, []))
     for part in ("x.amount <= 5000", "x.amount <= 1000", "x.tier = Tier.gold"): self.assertIn(part, lean)
+  def test_the_main_rules_are_worded_one_clause_per_field(self):
+    def make(rng):
+      x = {"amount": rng.randrange(8000), "tier": rng.choice(["gold", "basic"])}
+      return x, "deny" if x["amount"] > 5000 else "review" if x["amount"] > 1000 and x["tier"] == "basic" else "approve"
+    fields = ({"name": "amount", "type": "nat"}, {"name": "tier", "type": "enum", "values": ["gold", "basic"]})
+    rules = fit.fit_report(rows(make), schema(*fields))[0]["rules"]
+    self.assertEqual([(r["when"], r["then"]) for r in rules], [
+      ("amount is above 5,000", "deny"), ("amount is at most 5,000 and tier is gold", "approve"),
+      ("amount is 1,001 to 5,000 and tier is basic", "review"), ("amount is at most 1,000 and tier is basic", "approve")])
+    self.assertAlmostEqual(sum(r["share"] for r in rules), 1.0, places=2)
   def test_dates_are_not_compared_as_ratios(self):  # 20271231 / 20280101 is not a day: a ratio of two YYYYMMDD numbers is not calendar arithmetic
     start = datetime.date(2026, 1, 1)
     def make(rng):

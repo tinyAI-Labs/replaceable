@@ -2,7 +2,7 @@
 import contextlib, io, json, os, sys, tempfile, unittest
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "skills" / "replaceable" / "scripts"))
-import stats, verdict
+import report as page, stats, verdict
 
 def report(n=200, k=200, base=0.5, constant=False, low=None, **more):
   low = round(stats.clopper_pearson_lower(k, n), 4) if low is None else low
@@ -104,17 +104,30 @@ class TestReport(unittest.TestCase):  # the owner reads the answer and the token
     for name, state, held in (("DETERMINISTIC", ruled, receipt()), ("DETERMINISTIC_LEARNED", ruled, receipt(k=100, **model())),
                               ("INCONCLUSIVE", ruled, receipt(k=100)), ("PROBABILISTIC", exits("PROBABILISTIC", "conflicts"), None),
                               ("OUT_OF_SCOPE", exits("OUT_OF_SCOPE", "triage"), None)):
-      tokens = verdict.tokens_line({"known": False}, ask=name in verdict.SCOPED)
+      tokens, ask = verdict.tokens_line({"known": False}), [verdict.ASK] * (name in verdict.SCOPED)
       shown = self.conclusion(state, held)
-      self.assertEqual(shown[1:3], [f"Answer: {verdict.ANSWERS[name]}", tokens], name)
-      self.assertTrue(shown[0].startswith(f"replaceable · {name}") and shown[3].startswith("Full report: report.html"), name)
+      self.assertEqual(shown[1:-1], [f"Answer: {verdict.ANSWERS[name]}", tokens, *ask], name)
+      self.assertTrue(shown[0].startswith(f"replaceable · {name}") and shown[-1].startswith("Full report: report.html"), name)
       why = self.conclusion(state, held, why=True)  # asked why: the verdict, reasons and tokens come first; the compact block still ends it
-      self.assertEqual(why[-3:-1], [f"Answer: {verdict.ANSWERS[name]}", tokens], name)
+      self.assertEqual(why[-len(shown) + 1:], shown[1:], name)
       self.assertTrue(any(line.startswith(f"VERDICT: {name}") for line in why) and any(line.startswith("WHY:") for line in why), name)
   def test_only_a_loop_that_could_be_replaced_is_asked_about_its_spend(self):
     for name in verdict.ANSWERS:
-      self.assertEqual("tinyailabs.com" in verdict.tokens_line({"known": False}, ask=name in verdict.SCOPED), name in verdict.SCOPED, name)
-    self.assertNotIn("tinyailabs.com", verdict.tokens_line({"known": True, "per_run": 9, "logged": 90, "cases_with_tokens": 10}, ask=False))
+      shown = page.terminal({"verdict": name, "tokens": {"known": False}})
+      self.assertEqual("tinyailabs.com" in shown, name in verdict.SCOPED, name)
+  def test_the_verdict_describes_the_loop_and_its_rules_in_the_owners_words(self):
+    rules = [{"when": "derived0 is above 5", "then": "approve", "share": 0.5}]
+    fit = {"rule_sha256": stats.sha256("rule"), "rules": rules, "derived": {"expressions": {"derived0": "x.a * x.b"}}}
+    state = {"triage": {"scope": "full"}, "fit": fit}
+    schema = {"input": [{"name": "a", "role": "decision", "type": "nat"}, {"name": "id", "role": "identifier", "type": "nat"}],
+              "output": {"name": "output", "values": ["approve", "deny"]}}
+    with tempfile.TemporaryDirectory() as tmp, contextlib.chdir(tmp):
+      os.mkdir("work")
+      for name, text in (("work/audit.json", json.dumps(state)), ("Rule.lean", "rule"), ("schema.json", json.dumps(schema)),
+                         ("work/receipt.json", json.dumps({"rule_sha256": stats.sha256("rule"), **report()}))): Path(name).write_text(text)
+      result = verdict.write()
+    self.assertEqual(result["loop"], {"reads": ["a"], "answers": ["approve", "deny"]})  # an identifier is not something the loop decides on
+    self.assertEqual(result["rules"], [{"when": "a * b is above 5", "then": "approve", "share": 0.5}])
   def test_the_answer_says_which_part_of_the_log_it_checked(self):
     plain = {"verdict": "DETERMINISTIC"}
     self.assertEqual(verdict.answer_line(plain), "Answer: Yes, deterministic.")
@@ -129,7 +142,7 @@ class TestReport(unittest.TestCase):  # the owner reads the answer and the token
   def test_the_learning_phase_is_priced_against_the_converged_loop(self):
     spend = {"known": True, "per_run": 1000.0, "logged": 300_000, "cases_with_tokens": 300,
              "learning": {"from_run": 1300, "accuracy_before": 0.85, "tokens": {"with_tokens": 1300, "mean": 2500.0}}}
-    self.assertIn("the 1,300 runs before it converged (85% accurate) used 2,500 per run, 2.5x as much", verdict.tokens_line(spend))
+    self.assertIn("the first 1,300 runs, before it converged (85% accurate), cost 2,500 per run, 2.5x as much", verdict.tokens_line(spend))
     thin = {**spend, "learning": {**spend["learning"], "tokens": {"with_tokens": 10, "mean": 9000.0}}}
     self.assertNotIn("before it converged", verdict.tokens_line(thin))  # too few runs to compare
     self.assertNotIn("before it converged", verdict.tokens_line({**spend, "learning": None}))
@@ -140,7 +153,7 @@ class TestReport(unittest.TestCase):  # the owner reads the answer and the token
              "learning": {"converged": True, "runs": 500, "from_run": 40, "accuracy_before": 0.7, "tokens": {"with_tokens": 40, "mean": 300.0}}}
     block = verdict.token_block(state, None, {"verdict": "DETERMINISTIC"})
     self.assertEqual(block["learning"]["from_run"], 40)
-    self.assertIn("the 40 runs before it converged (70% accurate) used 300 per run, 3.0x as much", verdict.tokens_line(block))
+    self.assertIn("the first 40 runs, before it converged (70% accurate), cost 300 per run, 3.0x as much", verdict.tokens_line(block))
   def test_a_moving_loop_is_inconclusive_whatever_the_exam_says(self):
     unsettled = {"recent": 0.92, "before": 0.86, "runs": 200}
     ruled = {"triage": {"scope": "full"}, "fit": {"rule_sha256": stats.sha256("rule")}, "learning": {"unsettled": unsettled}}
@@ -173,25 +186,21 @@ class TestReport(unittest.TestCase):  # the owner reads the answer and the token
     self.assertEqual((block["cases_with_tokens"], block["logged"]), (10, 100))
     self.assertIn("(the log examined)", block["arithmetic"])
   def test_without_a_token_count_the_line_says_so_and_asks(self):
-    self.assertEqual(verdict.tokens_line({"known": False}),
-                     "Tokens: not in this log. Do you want to reduce your token spend for this agentic loop to zero? Find out how: https://tinyailabs.com/")
+    self.assertEqual(verdict.tokens_line({"known": False}), "Tokens: not in this log.")
   def test_with_a_token_count_the_line_quotes_the_spend(self):
     spend = {"known": True, "per_run": 864.5, "logged": 518_700, "cases_with_tokens": 600}
     line = verdict.tokens_line(spend)
-    self.assertTrue(line.startswith("Tokens: this loop used 864 per run, 518,700 over its 600 logged runs"), line)
-    self.assertNotIn("a month", line)  # no real timestamps, no pace
+    self.assertEqual(line, "Tokens: 864 per run, 518,700 over its 600 logged runs.")
     self.assertNotIn("$", line)  # no price, no cost: nothing is assumed
-    self.assertTrue(line.endswith("Do you want to reduce your token spend for this agentic loop to zero? Find out how: https://tinyailabs.com/"))
     month = verdict.tokens_line({**spend, "per_month": 1_120_000}, usd=3)
-    self.assertIn("at that pace about 1,120,000 a month (about $3.36 a month at $3 per million tokens)", month)
-    self.assertIn("(about $1.56 over the logged runs at $3 per million tokens)", verdict.tokens_line(spend, usd=3))
+    self.assertEqual(month, "Tokens: 864 per run, about 1,120,000 a month (about $3.36 at $3 per million tokens).")
+    self.assertIn("(about $1.56 at $3 per million tokens)", verdict.tokens_line(spend, usd=3))
   def test_the_conclusion_quotes_the_logged_tokens_and_the_price_it_was_given(self):
     ruled = {"triage": {"scope": "full"}, "fit": {"rule_sha256": stats.sha256("rule")}, "tokens": stats.token_stats([{"tokens": 1000}] * 100),
              "runs_per_day": 10.0}
     held = {"rule_sha256": stats.sha256("rule"), "tokens": stats.token_stats([{"tokens": 1200}] * 100), **report()}
-    line = self.conclusion(ruled, held, usd=2)[-2]
-    self.assertIn("1,100 per run, 220,000 over its 200 logged runs", line)
-    self.assertIn("at that pace about 330,000 a month (about $0.66 a month at $2 per million tokens)", line)
+    line = [shown for shown in self.conclusion(ruled, held, usd=2) if shown.startswith("Tokens:")][0]
+    self.assertEqual(line, "Tokens: 1,100 per run, about 330,000 a month (about $0.66 at $2 per million tokens).")
 
 class TestTokenBlock(unittest.TestCase):
   def block(self, name, early=None, receipt=None, **more): return verdict.token_block({"tokens": early}, receipt, {"verdict": name, **more})

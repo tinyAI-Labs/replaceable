@@ -1,3 +1,4 @@
 VERDICT: DETERMINISTIC_LEARNED (scope: full)
+Loop: Reads area, author, lines and decides one of 3 outcomes (large, medium, small).
 Answer: Yes, deterministic (no readable rule). Checked on the runs after the loop held 95% accuracy (after run 1,250 of 5,000).
-Tokens: this loop used 1,521 per run, 5,705,327 over its 3,750 runs after it converged, at that pace about 16,439,888 a month; the 1,250 runs before it converged (72% accurate) used 4,542 per run, 3.0x as much. Do you want to reduce your token spend for this agentic loop to zero? Find out how: https://tinyailabs.com/
+Tokens: 1,521 per run, about 16,439,888 a month; the first 1,250 runs, before it converged (72% accurate), cost 4,542 per run, 3.0x as much.

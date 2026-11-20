@@ -1,7 +1,7 @@
 # the verdict as code: computed from work/audit.json and work/receipt.json, written to verdict.json (the table is in SKILL.md)
 # usage: python3 scripts/verdict.py [--scope full|decision_step_only] [--note "..."]
 from __future__ import annotations
-import argparse, json, sys
+import argparse, json, re, sys
 from pathlib import Path
 from typing import Any
 import stats
@@ -47,21 +47,21 @@ def learning_cost(tokens: dict[str, Any]) -> tuple[float, float] | None:
     return spent["mean"], spent["mean"] / tokens["per_run"]
   return None
 
-def tokens_line(tokens: dict[str, Any], usd: float | None = None, ask: bool = True) -> str:
-  # the second line: what the loop spends, from the log's own counts (a price only if given, a pace only if the log has dates), then the question,
-  # asked only of a loop that could be replaced
-  tail = f" {ASK}" if ask else ""
-  if not tokens["known"]: return f"Tokens: not in this log.{tail}"
+def tokens_line(tokens: dict[str, Any], usd: float | None = None) -> str:
+  # what the loop spends, from the log's own counts: per run, per month if the log has dates (else over the logged runs), a price only if given,
+  # and what the runs before it converged cost
+  if not tokens["known"]: return "Tokens: not in this log."
   learned = tokens.get("learning") or {}
   runs = ("latest runs" if learned.get("trimmed") else "runs after it converged" if "from_run" in learned
           else "runs in its steady stretch" if learned.get("examined_from") else "logged runs")
-  said = f"this loop used {tokens['per_run']:,.0f} per run, {tokens['logged']:,} over its {tokens['cases_with_tokens']:,} {runs}"
-  if "per_month" in tokens: said += f", at that pace about {tokens['per_month']:,} a month"
+  total = tokens.get("per_month") or tokens["logged"]
+  over = f"about {total:,} a month" if "per_month" in tokens else f"{total:,} over its {tokens['cases_with_tokens']:,} {runs}"
+  said = f"{tokens['per_run']:,.0f} per run, {over}"
+  if usd: said += f" (about ${total * usd / 1e6:,.2f} at ${usd:g} per million tokens)"
   if cost := learning_cost(tokens):  # what a budget made from the converged cost leaves out
-    said += (f"; the {learned['from_run']:,} runs before it converged ({pct(learned['accuracy_before'])} accurate) used {cost[0]:,.0f} per run, "
-             f"{cost[1]:.1f}x as much")
-  total, span = (tokens["per_month"], "a month") if "per_month" in tokens else (tokens["logged"], "over the logged runs")
-  return f"Tokens: {said}" + (f" (about ${total * usd / 1e6:,.2f} {span} at ${usd:g} per million tokens)" if usd else "") + f".{tail}"
+    early = f"the first {learned['from_run']:,} runs, before it converged ({pct(learned['accuracy_before'])} accurate)"
+    said += f"; {early}, cost {cost[0]:,.0f} per run, {cost[1]:.1f}x as much"
+  return f"Tokens: {said}."
 
 def verdict_from_replay(replay: dict[str, Any]) -> tuple[str, str]:
   # NOTE: (verdict, reason) for a replay report or receipt. L is the exact one-sided 95% lower bound on the held-out agreement. The rows
@@ -165,6 +165,13 @@ def write(scope: str | None = None, note: str | None = None, rule="Rule.lean", o
   verdict["completed_by"] = completed_by(state)
   verdict["tokens"] = token_block(state, receipt, verdict)
   if state.get("learning"): verdict["learning"] = {k: v for k, v in state["learning"].items() if k != "tokens"}
+  if Path("schema.json").is_file():  # the loop in the owner's words: what it reads, what it can answer
+    schema = stats.read_schema("schema.json")
+    verdict["loop"] = {"reads": stats.decision_fields(schema), "answers": schema["output"]["values"]}
+  fit = state.get("fit", {})
+  if verdict["verdict"] in ("DETERMINISTIC", "CONSTANT") and fit.get("rules"):  # the rule that was examined, its main branches
+    names = {k: e.replace("x.", "") for k, e in fit.get("derived", {}).get("expressions", {}).items()}
+    verdict["rules"] = [{**r, "when": re.sub(r"\bderived\d+\b", lambda m: names.get(m.group(), m.group()), r["when"])} for r in fit["rules"]]
   stats.write_text_atomic(Path(out), json.dumps(verdict, indent=2))
   return verdict
 

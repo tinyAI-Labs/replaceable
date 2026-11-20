@@ -30,10 +30,10 @@ For another agent, copy `skills/replaceable/` to where it keeps skills. Then che
 Give the agent a log and ask whether the loop is replaceable, or run the two commands yourself, in the directory that holds the log:
 
     python3 $S/prepare.py raw.jsonl   # types the log, splits it by time into logs/early.jsonl and logs/heldout.jsonl
-    python3 $S/run.py                 # audit, one-shot replay, verdict: ends with a compact block: verdict, Answer, Tokens (add --why for VERDICT / WHY / TOKENS)
+    python3 $S/run.py                 # audit, one-shot replay, verdict: ends with a compact block: verdict, Loop, Answer, Tokens (add --why for VERDICT / WHY / TOKENS)
 
 To try it first, copy `examples/ticket_triage/raw.jsonl` (6,000 runs of a support-ticket router that learned its routing from corrections) into an empty directory: the
-output ends with `Answer: Yes, deterministic. Checked on the runs after the loop held 95% accuracy ...` and a `Tokens:` line with what the loop spends, now and while it was learning. The full picture is in `report.html` (open it in a browser: numbers, the loop over time, the reasoning) and `report.md` (the same for a terminal or the Claude app). Add `--why` to `run.py` (it resumes, nothing is replayed again) to also see the `VERDICT:`, `WHY:` and `TOKENS:` lines; an agent running the skill prints them only if you ask why. Four more examples are below.
+output ends with a `Loop:` line (what the loop reads and what it decides), `Answer: Yes, deterministic. Checked on the runs after the loop held 95% accuracy ...` and a `Tokens:` line with what the loop spends per run and per month, and what it spent while it was learning. The full picture is in `report.html` (open it in a browser: what the loop does in words, what it costs, what a fixed rule would cost, the loop over time, and the evidence folded away) and `report.md` (the same for a terminal or the Claude app). Add `--why` to `run.py` (it resumes, nothing is replayed again) to also see the `VERDICT:`, `WHY:` and `TOKENS:` lines; an agent running the skill prints them only if you ask why. Four more examples are below.
 
 `raw.jsonl` has one logged run per line: `{"typed_input": {...}, "output": ..., "ts": ..., "tokens": 1840, "correct": true}`. `typed_input` holds numbers,
 booleans, dates and categories; `ts`, `case_id`, the token count and `correct` are optional. At least 150 runs are needed. `run.py` asks at most one question (the scope:

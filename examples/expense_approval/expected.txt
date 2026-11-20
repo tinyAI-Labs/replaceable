@@ -1,3 +1,4 @@
 VERDICT: INCONCLUSIVE
+Loop: Reads department, amount and decides one of 4 outcomes (approve, escalate, hold, reject).
 Answer: Cannot tell from this log. Checked on the runs after the loop held 95% accuracy (after run 1,050 of 6,000).
-Tokens: this loop used 1,201 per run, 5,943,786 over its 4,950 runs after it converged, at that pace about 12,973,882 a month; the 1,050 runs before it converged (77% accurate) used 3,283 per run, 2.7x as much.
+Tokens: 1,201 per run, about 12,973,882 a month; the first 1,050 runs, before it converged (77% accurate), cost 3,283 per run, 2.7x as much.

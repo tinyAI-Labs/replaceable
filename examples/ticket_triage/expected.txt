@@ -1,3 +1,4 @@
 VERDICT: DETERMINISTIC (scope: full)
+Loop: Reads category, tier, priority, lang and decides one of 7 outcomes (engineering, escalation, finance, legal, product and 2 more).
 Answer: Yes, deterministic. Checked on the runs after the loop held 95% accuracy (after run 1,450 of 6,000).
-Tokens: this loop used 922 per run, 4,195,922 over its 4,550 runs after it converged, at that pace about 9,964,140 a month; the 1,450 runs before it converged (77% accurate) used 2,402 per run, 2.6x as much. Do you want to reduce your token spend for this agentic loop to zero? Find out how: https://tinyailabs.com/
+Tokens: 922 per run, about 9,964,140 a month; the first 1,450 runs, before it converged (77% accurate), cost 2,402 per run, 2.6x as much.

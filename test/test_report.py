@@ -5,7 +5,8 @@ import report, stats
 
 TOKENS = {"known": True, "per_run": 1200.0, "logged": 1_000_000, "cases_with_tokens": 800, "rule_share": 1.0, "per_month": 3_000_000,
           "learning": {"from_run": 200, "accuracy_before": 0.7, "tokens": {"with_tokens": 200, "mean": 3000.0}}}
-RESULT = {"verdict": "DETERMINISTIC", "scope": "full", "rationale": "The rule matched <all> of them.", "tokens": TOKENS,
+RESULT = {"verdict": "DETERMINISTIC", "scope": "full", "loop": {"reads": ["amount", "tier"], "answers": ["approve", "deny"]},
+          "rules": [{"when": "tier is gold", "then": "approve", "share": 0.6}], "rationale": "The rule matched <all> of them.", "tokens": TOKENS,
           "n_heldout": 400, "lower_bound": 0.99, "agreement": 1.0, "baseline": 0.5,
           "learning": {"converged": True, "runs": 1000, "accuracy": 0.99, "from_run": 200, "accuracy_before": 0.7,
                        "curve": [[0.6, 3000.0], [0.8, 2000.0], [0.99, 1200.0], [1.0, 1200.0]]}}
@@ -21,20 +22,37 @@ class TestCurve(unittest.TestCase):
   def test_a_block_without_token_counts_has_none(self):
     self.assertEqual(stats.curve([{"correct": True}] * 10, blocks=2), [[1.0, None], [1.0, None]])
 
-class TestFacts(unittest.TestCase):
-  def test_the_numbers_a_reader_needs(self):
-    said = {label: (value, note) for label, value, note in report.facts(RESULT, 3.0)}
-    self.assertEqual(said["Learning phase"], ("200 runs", "70% right, set aside"))
-    self.assertEqual(said["Learning phase cost"], ("2.5x per run", "3,000 tokens per run"))
-    self.assertEqual(said["Tokens per month"], ("3,000,000", "$9.00 at $3 per million"))
-    self.assertEqual(said["A rule would take over"], ("100% of runs", "3,000,000 tokens a month"))
-    self.assertEqual(said["Held-back replay"][0], "100.0% matched")
-  def test_a_log_without_counts_or_feedback_has_no_such_rows(self):
+class TestCosts(unittest.TestCase):
+  def said(self, result, usd=None): return {label: (value, note) for label, value, note in report.cost_rows(result, usd)}
+  def test_what_the_loop_costs_per_run_at_scale_and_while_it_learned(self):
+    said = self.said(RESULT, 3.0)
+    self.assertEqual(said["Per run"], ("1,200 tokens", "once it works"))
+    self.assertEqual(said["Per month"], ("3,000,000 tokens", "about $9.00 at $3 per million"))
+    self.assertEqual(said["While it was learning"], ("2.5x as much per run", "3,000 tokens, the first 200 runs, 70% right"))
+  def test_without_a_pace_the_log_total_and_the_price_are_shown(self):
+    paceless = RESULT | {"tokens": {k: val for k, val in TOKENS.items() if k != "per_month"} | {"saved_logged": 1_000_000}}
+    self.assertEqual(self.said(paceless, 2.0)["In the log"], ("1,000,000 tokens", "about $2.00 at $2 per million"))
+    self.assertEqual(report.saving(paceless), "A fixed rule runs this for 0 tokens: 1,000,000 tokens over the log saved.")
+  def test_nothing_is_said_about_cost_without_a_token_count(self):
     bare = {"verdict": "INCONCLUSIVE", "rationale": "r", "tokens": {"known": False}}
-    self.assertEqual(report.facts(bare), [])
+    self.assertEqual((report.cost_rows(bare), report.saving(bare), report.evidence_rows(bare)), ([], None, []))
+  def test_a_saving_only_where_a_rule_takes_over(self):
+    self.assertEqual(report.saving(RESULT), "A fixed rule runs this for 0 tokens: about 3,000,000 tokens a month saved.")
+    self.assertIsNone(report.saving(RESULT | {"tokens": TOKENS | {"rule_share": 0.0}}))
 
-class TestFactsEdges(unittest.TestCase):
-  def said(self, result, usd=None): return {label: (value, note) for label, value, note in report.facts(result, usd)}
+class TestTheLoop(unittest.TestCase):
+  LOOP = {"reads": ["amount", "tier"], "answers": ["approve", "deny"]}
+  def test_the_loop_in_one_sentence(self):
+    self.assertEqual(report.loop_text({"loop": self.LOOP}), "Reads amount, tier and decides one of 2 outcomes (approve, deny).")
+    many = {"reads": [f"f{i}" for i in range(8)], "answers": []}
+    self.assertEqual(report.loop_text({"loop": many}), "Reads f0, f1, f2, f3, f4 and 3 more and writes free text.")
+    self.assertIsNone(report.loop_text({}))
+  def test_the_main_rules_in_words(self):
+    rules = [{"when": "tier is not gold", "then": "deny", "share": 0.456}, {"when": "everywhere", "then": "approve", "share": 0.3}]
+    self.assertEqual(report.rule_lines({"rules": rules}), ["46% of runs: tier is not gold → deny", "30% of runs: always approve"])
+
+class TestEvidence(unittest.TestCase):
+  def said(self, result): return {label: (value, note) for label, value, note in report.evidence_rows(result)}
   def test_a_loop_right_from_the_start_is_not_called_below_95(self):
     right = {"verdict": "OUT_OF_SCOPE", "rationale": "r", "tokens": {"known": False}, "learning": {"converged": True, "runs": 500, "accuracy": 1.0}}
     self.assertEqual(self.said(right)["Feedback"], ("100% right", "steady, at or above 95%"))
@@ -49,13 +67,6 @@ class TestFactsEdges(unittest.TestCase):
   def test_a_trimmed_log_counts_the_runs_examined(self):
     trimmed = RESULT | {"learning": RESULT["learning"] | {"trimmed": True}}
     self.assertEqual(self.said(trimmed)["Converged loop"], ("800 runs", "99% right, examined, latest only"))
-  def test_a_decision_step_saving_is_an_upper_bound(self):
-    bound = RESULT | {"tokens": TOKENS | {"note": "upper bound"}}
-    self.assertEqual(self.said(bound)["A rule would take over"][1], "3,000,000 tokens a month, an upper bound")
-  def test_without_a_pace_the_log_total_and_the_price_are_shown(self):
-    paceless = RESULT | {"tokens": {k: val for k, val in TOKENS.items() if k != "per_month"} | {"saved_logged": 1_000_000}}
-    self.assertEqual(self.said(paceless, 2.0)["Tokens in the log"], ("1,000,000", "$2.00 at $2 per million"))
-    self.assertEqual(self.said(paceless)["A rule would take over"][1], "1,000,000 tokens in the log")
   def test_the_next_step_follows_where_an_inconclusive_verdict_came_from(self):
     self.assertIn("steady for 300", report.next_step({"verdict": "INCONCLUSIVE", "exit_stage": "feedback"}))
     self.assertIn("rationale", report.next_step({"verdict": "INCONCLUSIVE", "exit_stage": "replay"}))
@@ -67,18 +78,22 @@ class TestFactsEdges(unittest.TestCase):
 class TestRendering(unittest.TestCase):
   def test_spark_scales_between_its_bounds_and_marks_gaps(self):
     self.assertEqual(report.spark([0.5, 0.75, 1.0, None], 0.5, 1.0), "▁▅█·")
-  def test_terminal_keeps_the_answer_and_tokens_lines_and_names_the_files(self):
+  def test_terminal_names_the_loop_the_answer_the_cost_and_the_question(self):
     lines = report.terminal(RESULT).splitlines()
     self.assertEqual(lines[0], "replaceable · DETERMINISTIC (full)")
-    self.assertTrue(lines[1].startswith("Answer: Yes, deterministic.") and lines[2].startswith("Tokens: this loop used 1,200 per run"))
-    self.assertIn("report.html", lines[3])
-  def test_markdown_has_the_table_the_curves_and_the_next_step(self):
+    self.assertEqual(lines[1], "Loop: Reads amount, tier and decides one of 2 outcomes (approve, deny).")
+    self.assertTrue(lines[2].startswith("Answer: Yes, deterministic.") and lines[3].startswith("Tokens: 1,200 per run"))
+    self.assertIn("tinyailabs.com", lines[4])
+    self.assertIn("report.html", lines[5])
+  def test_markdown_leads_with_the_verdict_in_words_then_the_loop_the_cost_and_the_saving(self):
     text = report.markdown(RESULT)
-    self.assertIn("| Tokens per run | **1,200** |", text)
-    self.assertIn("right per block  ", text)
+    heads = ("# Predictable", "## The loop", "60% of runs: tier is gold → approve", "## What it costs", "## What a fixed rule would cost",
+             "## The loop over time", "## The evidence")
+    order = [text.index(h) for h in heads]
+    self.assertEqual(order, sorted(order))
+    self.assertIn("| Per run | **1,200 tokens** |", text)
     self.assertIn("60% → 100%", text)
     self.assertIn("The loop held 95% from run 200.", text)
-    self.assertIn("## Next", text)
   def test_html_is_one_escaped_self_contained_page(self):
     page = report.page(RESULT)
     self.assertIn("&lt;all&gt;", page)
@@ -86,6 +101,7 @@ class TestRendering(unittest.TestCase):
     self.assertIn("<svg", page)
     self.assertNotIn("http://", page.replace("https://tinyailabs.com/", ""))  # no remote resource, only the closing question's link
     self.assertNotIn("src=", page)
+    self.assertIn("<details", page)  # the evidence is folded away: the page opens on the verdict, the loop and the cost
   def test_no_ask_for_a_loop_that_cannot_be_replaced(self):
     guesser = RESULT | {"verdict": "PROBABILISTIC"}
     self.assertNotIn("tinyailabs", report.markdown(guesser))
