@@ -5,7 +5,7 @@
 # them. The agent's run.py then stops before the exam and leaves work/replay_request.json, which names the Rule.lean it wants examined
 # by its hash. This script refuses when nothing is requested or Rule.lean is no longer the requested rule (neither uses up the replay),
 # runs the exam once, keeps the receipt in --receipts (a directory the agent cannot write, if you have one) with a copy in the agent's
-# work/, then writes verdict.json in the agent's directory and prints the `VERDICT:` line. --replay-only serves an agent that works
+# work/, then writes verdict.json in the agent's directory and prints the `Answer:` line. --replay-only serves an agent that works
 # without run.py: no request is needed, no verdict is written, and the replay report is printed as one JSON line.
 from __future__ import annotations
 import argparse, os, shutil, sys

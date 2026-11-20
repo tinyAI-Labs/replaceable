@@ -1,6 +1,7 @@
 # the whole procedure in one command: the audit of the early half, the one-shot held-out replay, the verdict
-# usage: python3 scripts/run.py [--scope full|decision_step_only] [--derive "x.account_no % 10"]... [--note "..."]
-# NOTE: it runs every step itself and ends with a `VERDICT:` line. A weak rule is not a question: it takes the exam as it is and ends
+# usage: python3 scripts/run.py [--scope full|decision_step_only] [--derive "x.account_no % 10"]... [--note "..."] [--why]
+# NOTE: it runs every step itself and ends with the `Answer:` and `Signup:` lines; `--why` adds the audit, the replay report and the
+# `VERDICT:`, `WHY:` and `TOKENS:` lines before them. A weak rule is not a question: it takes the exam as it is and ends
 # INCONCLUSIVE. Before the verdict it stops only where it cannot go on alone, with the exact command to continue (NEXT) and the reason
 # (WHY): the scope is undeclared; a --derive expression is not valid Lean; or the host
 # keeps the held-back half, in which case the request is left in work/replay_request.json for host_replay.py. --derive has to come with
@@ -36,6 +37,7 @@ def main():
   parser.add_argument("--derive", action="append", default=None, metavar="LEAN_EXPR",
                       help='a quantity you know the policy uses, as a Nat-valued Lean expression of x, e.g. "x.account_no %% 10"; repeatable')
   parser.add_argument("--note", default=None, help="your own remark, appended to the verdict's rationale")
+  parser.add_argument("--why", action="store_true", help="also print the audit, the replay, VERDICT, WHY, TOKENS (default: answer and sign-up only)")
   args = parser.parse_args()
 
   if replay.read_receipt() is None:  # before the exam
@@ -43,7 +45,7 @@ def main():
       stop(f"`python3 {audit.scripts_dir()}/prepare.py <raw log>.jsonl`, then `{audit.RUN_COMMAND}`", "logs/early.jsonl is missing: the working "
            "directory needs schema.json, Types.lean and the split log, which prepare.py makes from one raw log.", 1)
     state = current_audit(args)
-    stats.emit(audit.view(state), trim=("residual",))
+    if args.why: stats.emit(audit.view(state), trim=("residual",))
     rejected = state.get("derive_rejected")
     if rejected and args.derive:  # NOTE: the exam is not taken on a rule the reader meant to improve
       stop(f'`{audit.RUN_COMMAND} --derive "<corrected expression>"`, or go on without it: `{audit.RUN_COMMAND}`',
@@ -53,14 +55,14 @@ def main():
     # NOTE: when the host keeps the held-back half, name the rule that is ready for the exam and leave the replay to the host
     if step["action"] == "replay" and not HELDOUT.is_file():
       stats.write_text_atomic(REQUEST, json.dumps({"rule": str(RULE), "rule_sha256": stats.sha256(RULE.read_text(encoding="utf-8"))}, indent=2))
-      stop(f"nothing to run if a `VERDICT:` line follows below (the host has run the replay); otherwise `{audit.RUN_COMMAND}` again once it has",
+      stop(f"nothing to run if an `Answer:` line follows below (the host has run the replay); otherwise `{audit.RUN_COMMAND}` again once it has",
            f"{step['why']} {HELDOUT} is not in this directory: the host keeps the held-back half. The replay of this rule is requested in "
            f"{REQUEST}; the host answers it with host_replay.py, which runs the exam once and writes the verdict.")
     if step["action"] == "replay":
       report = replay.replay()
-      stats.emit(report, trim=("counterexamples",))
+      if args.why: stats.emit(report, trim=("counterexamples",))
       if replay.read_receipt() is None:  # refused without using the replay
         stop(audit.next_line({"action": "broken"}, via_run=True), f"The replay did not run: {report.get('error')}.", 1)
-  sys.exit(verdict.conclude(args.scope, args.note))
+  sys.exit(verdict.conclude(args.scope, args.note, args.why))
 
 if __name__ == "__main__": main()

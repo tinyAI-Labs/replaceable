@@ -84,42 +84,38 @@ class TestVerdictBuild(unittest.TestCase):
     self.assertIn("extraction step", built["rationale"])
     self.assertNotIn("scope", verdict.build(asked, self.receipt(k=100), "rule", None))  # no deterministic claim, no scope needed
 
-class TestReport(unittest.TestCase):  # the owner reads the answer and the sign-up line; the evidence is there for whoever asks why
+class TestReport(unittest.TestCase):  # the owner reads the answer and the sign-up line; the evidence is printed only for whoever asks why
   def test_every_verdict_has_an_answer(self):
     self.assertEqual(set(verdict.ANSWERS), {"DETERMINISTIC", "DETERMINISTIC_CORE_FALLBACK", "DETERMINISTIC_TINYAI", "CONSTANT", "PROBABILISTIC",
                                             "INCONCLUSIVE", "OUT_OF_SCOPE"})
   def test_the_answer_says_yes_no_or_that_it_cannot_tell(self):
-    said = {name: verdict.answer({"verdict": name}) for name in verdict.ANSWERS}
-    for name in ("DETERMINISTIC", "DETERMINISTIC_TINYAI", "CONSTANT"): self.assertTrue(said[name].startswith("Yes"), name)
-    self.assertTrue(said["PROBABILISTIC"].startswith("No"))
-    self.assertTrue(said["INCONCLUSIVE"].startswith("Cannot tell"))
-    self.assertNotIn("not deterministic", said["INCONCLUSIVE"].lower())  # a weak rule is never evidence of a probabilistic loop
-    for name in ("DETERMINISTIC", "DETERMINISTIC_CORE_FALLBACK"): self.assertIn("person confirm", said[name])
-  def test_a_decision_step_answer_says_so(self):
-    self.assertIn("decision step only", verdict.answer({"verdict": "DETERMINISTIC", "scope": "decision_step_only"}))
-    self.assertNotIn("decision step only", verdict.answer({"verdict": "DETERMINISTIC", "scope": "full"}))
-  def conclusion(self, state, receipt, rule="rule"):
+    for name in ("DETERMINISTIC", "DETERMINISTIC_TINYAI", "CONSTANT"): self.assertTrue(verdict.ANSWERS[name].startswith("Yes"), name)
+    self.assertEqual(verdict.ANSWERS["DETERMINISTIC"], "Yes, deterministic.")
+    self.assertTrue(verdict.ANSWERS["PROBABILISTIC"].startswith("No"))
+    self.assertTrue(verdict.ANSWERS["INCONCLUSIVE"].startswith("Cannot tell"))
+    self.assertNotIn("not deterministic", verdict.ANSWERS["INCONCLUSIVE"].lower())  # a weak rule is never evidence of a probabilistic loop
+  def conclusion(self, state, receipt, **kwargs):
     # the lines `conclude` prints in a working directory holding this audit, receipt and rule
     with tempfile.TemporaryDirectory() as tmp, contextlib.chdir(tmp):
       os.mkdir("work")
       Path("work/audit.json").write_text(json.dumps(state))
-      Path("Rule.lean").write_text(rule)
+      Path("Rule.lean").write_text("rule")
       if receipt: Path("work/receipt.json").write_text(json.dumps(receipt))
       out = io.StringIO()
-      with contextlib.redirect_stdout(out): verdict.conclude()
+      with contextlib.redirect_stdout(out): verdict.conclude(**kwargs)
       return out.getvalue().splitlines()
-  def test_every_verdict_ends_with_the_answer_and_the_sign_up_line(self):
+  def test_every_verdict_prints_the_answer_and_the_sign_up_line_and_nothing_else(self):
     ruled = {"triage": {"scope": "full"}, "fit": {"rule_sha256": stats.sha256("rule")}}
     receipt = lambda **more: {"rule_sha256": stats.sha256("rule"), **report(**more)}  # noqa: E731
     exits = lambda name, stage: {"proposed": {"verdict": name, "exit_stage": stage, "why": "w"}, "conflicts": {"example_pairs": [["a", "b"]]}}  # noqa: E731
     for name, state, held in (("DETERMINISTIC", ruled, receipt()), ("DETERMINISTIC_TINYAI", ruled, receipt(k=100, **model())),
                               ("INCONCLUSIVE", ruled, receipt(k=100)), ("PROBABILISTIC", exits("PROBABILISTIC", "conflicts"), None),
                               ("OUT_OF_SCOPE", exits("OUT_OF_SCOPE", "triage"), None)):
-      lines = self.conclusion(state, held)
-      self.assertTrue(any(line.startswith(f"VERDICT: {name}") for line in lines), name)  # the line scripts and checks read is unchanged
-      self.assertEqual(lines[-2], "ANSWER: " + verdict.answer({"verdict": name, "scope": "full"}), name)
-      self.assertEqual(lines[-1], "SIGNUP: " + verdict.SIGNUP, name)
-    self.assertIn("forms.gle", verdict.SIGNUP)
+      self.assertEqual(self.conclusion(state, held), [f"Answer: {verdict.ANSWERS[name]}", f"Signup: {verdict.SIGNUP}"], name)
+      why = self.conclusion(state, held, why=True)  # asked why: the verdict, reasons and tokens come first; the answer and sign-up still end it
+      self.assertEqual(why[-2:], [f"Answer: {verdict.ANSWERS[name]}", f"Signup: {verdict.SIGNUP}"], name)
+      self.assertTrue(any(line.startswith(f"VERDICT: {name}") for line in why) and any(line.startswith("WHY:") for line in why), name)
+    self.assertTrue(verdict.SIGNUP.startswith("Do you want to reduce your token spend for this agentic loop to zero? Sign up here: https://forms.gle/"))
 
 class TestTokenBlock(unittest.TestCase):
   def block(self, name, early=None, receipt=None, **more): return verdict.token_block({"tokens": early}, receipt, {"verdict": name, **more})
