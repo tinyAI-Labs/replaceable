@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Sequence
 import lean, stats
 from derive import KINDS, candidates, screen, widen
-from fit import RISING, fit_report, forecast, learning, rank
+from fit import RISING, fit_report, forecast, learning
 
 AUDIT_FILE = stats.WORK_DIR / "audit.json"
 LOG_KEYS = {"case_id", "ts", "correct", "typed_input", "output"} | stats.TOKEN_KEYS
@@ -84,12 +84,13 @@ def fit_best(rows: list[stats.Row], schema: stats.Schema, types_src: str, offere
   # NOTE: the fitted rule and its report, on the fields as typed or with derived quantities where they cross-validate better. `offered`
   # are the reader's --derive expressions. Unless the rule on the typed fields is already strong, the
   # built-in candidates are screened and those the pruned fit uses join them. Lean computes every quantity, so the numbers the fit sees
-  # are the numbers the rule will compute. The fit with them stands only if it ranks higher (`fit.rank`).
+  # are the numbers the rule will compute. The fit with them stands only if it cross-validates better.
   def diagnosed(report: dict[str, Any], *fitted: Any) -> dict[str, Any]:  # a weak rule's report gets the learning diagnostic of its rows
     return {**report, **(learning(*fitted) or {})} if forecast(report)[0] < stats.BOUND_DETERMINISTIC else report
 
   plain, plain_src = fit_report(rows, schema)
-  what = {**(candidates(rows, schema) if rank(plain)[0] < 1 else {}), **{e: "offered with --derive" for e in offered}}
+  strong = not plain["early_misses"] and forecast(plain)[0] >= stats.BOUND_DETERMINISTIC  # a whole rule needs no derived quantity
+  what = {**({} if strong else candidates(rows, schema)), **{e: "offered with --derive" for e in offered}}
   searched = [e for e in what if e not in offered]
   if not offered and not searched: return diagnosed(plain, rows, schema), plain_src
   note: dict[str, Any] = {"without_them": {k: plain[k] for k in SCORES}}
@@ -107,7 +108,7 @@ def fit_best(rows: list[stats.Row], schema: stats.Schema, types_src: str, offere
   report, source = fit_report(*wide)
   note.update(expressions=dict(zip(names, expressions)), with_them={k: report[k] for k in SCORES})
   used = [k for k, name in enumerate(names) if name in report["fields_used"]]
-  if not used or rank(report) <= rank(plain):
+  if not used or forecast(report)[0] <= forecast(plain)[0]:
     stands = {**plain, "derived": {**note, "used_by_the_rule": [], "note": "no gain in cross-validated agreement: the rule without them stands"}}
     return diagnosed(stands, rows, schema), plain_src
   source = lean.derived_defs(expressions, used, [what[e] for e in expressions]) + re.sub(r"\bx\.(derived\d+)\b", r"(\1 x)", source)

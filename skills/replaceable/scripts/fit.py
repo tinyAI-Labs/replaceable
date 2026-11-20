@@ -10,7 +10,7 @@ from fractions import Fraction
 from math import inf, log2
 from typing import Any, NamedTuple, Sequence
 from lean import pascal
-from stats import BOUND_DETERMINISTIC, Row, Schema, decision_fields, output_order
+from stats import Row, Schema, decision_fields, output_order
 from thresholds import pick_threshold, strict
 
 MAX_LEAVES = 16  # size cap of the rule, so that a person can read and sign it off
@@ -42,12 +42,8 @@ class Test(NamedTuple):
     num, den = _parts(self, x)
     return num * self.thr.denominator <= self.thr.numerator * den
 
-  def lean(self, branch: int = 0) -> str:
-    # the condition for taking `branch`, as a Lean proposition (ASCII operators, so any terminal can print it)
-    if self.kind == "switch": return f"x.{self.a} = {pascal(self.a)}.{self.values[branch]}"
-    return self._lean_yes() if branch == 0 else f"Not ({self._lean_yes()})"
-
-  def _lean_yes(self) -> str:
+  def lean(self) -> str:
+    # the condition of a two-way test, as a Lean proposition (ASCII operators, so any terminal can print it)
     n, d = self.thr.numerator, self.thr.denominator
     if self.kind == "is": return f"x.{self.a} = {pascal(self.a)}.{self.value}"
     if self.kind == "in": return f"([{', '.join('.' + v for v in self.values)}] : List {pascal(self.a)}).contains x.{self.a} = true"
@@ -294,9 +290,3 @@ def learning(rows: Sequence[Row], schema: Schema) -> dict[str, Any] | None:
     tree = Fitter(inputs, outputs, schema).fit([i for i in range(n) if i % CV_FOLDS != k and (i // CV_FOLDS) % 2 == 0])
     hits += sum(tree.predict(inputs[i]) == outputs[i] for i in range(k, n, CV_FOLDS))
   return {"cv_agreement_on_half_the_cases": round(hits / n, 4)}
-
-def rank(report: dict[str, Any]) -> tuple[int, float]:
-  # how good a fitted rule looks on the early half, to choose between two fits: first its class (1: strong, 0: weak), then its
-  # cross-validated agreement
-  strong = forecast(report)[0] >= BOUND_DETERMINISTIC
-  return int(strong), report["cv_agreement"] if report["cv_agreement"] is not None else report["early_agreement"]

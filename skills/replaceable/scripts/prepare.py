@@ -170,27 +170,22 @@ def main():
     slope = stats.drifting(tail)
     if slope:  # NOTE: still climbing or sinking across the steady stretch: the policy is still being changed
       learning["unsettled"] = {"recent": round(slope[1], 3), "before": round(slope[0], 3), "runs": len(tail), "drift": True}
-      learning["examined_from"] = steady
       notes.append(f"the loop's feedback is still moving ({slope[0]:.0%} early in its last {len(tail)} runs, {slope[1]:.0%} at the end)")
-      rows = rows[steady:]
     elif accuracy >= stats.PLATEAU and len(tail) >= stats.MIN_TAIL:
       if steady and sum(correct[:steady]) / steady >= stats.PLATEAU: steady = 0  # a dip in a loop that was right all along is not a learning phase
       if steady:
         learning |= {"from_run": steady, "accuracy_before": round(sum(correct[:steady]) / steady, 3)}
         learning["tokens"] = stats.token_stats(rows[:steady])
         notes.append(f"the loop held 95% accuracy after run {steady} of {len(rows)}: those {steady} runs are its learning phase, the rest is checked")
-      rows = rows[steady:]
     elif accuracy < stats.PLATEAU and (len(tail) >= 2 * stats.MIN_TAIL or not steady):  # steady below 95%: examined as it is, it may be a guesser
-      learning["examined_from"] = steady
       where = f"its steady stretch (from run {steady}) is examined" if steady else "the whole log is examined"
       notes.append(f"the loop's feedback holds at {accuracy:.0%}, below 95%: {where}")
-      rows = rows[steady:]
     else:  # NOTE: the feedback changed within the last stretch of the log: there is no fixed policy to test yet
       was = sum(before) / len(before)
       learning["unsettled"] = {"recent": round(accuracy, 3), "runs": len(tail), "before": round(was, 3)}
-      learning["examined_from"] = steady
       notes.append(f"the loop's feedback changed {len(tail)} runs before the end of the log ({accuracy:.0%} since, {was:.0%} before): INCONCLUSIVE")
-      rows = rows[steady:]
+    if "from_run" not in learning: learning["examined_from"] = steady  # a learning phase is set aside; anything else is examined from here
+    rows = rows[steady:]
   if args.max_rows and len(rows) > args.max_rows:
     notes.append(f"kept the latest {args.max_rows} of {len(rows)} cases (--max-rows)")
     rows = rows[-args.max_rows:]

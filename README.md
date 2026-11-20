@@ -2,7 +2,7 @@
 
 Is this agent loop doing work a fixed rule could do? `replaceable` is an agent skill (a `SKILL.md` plus standard-library Python scripts) that answers
 from the loop's own log: it fits a small, readable rule to the earlier half of the logged cases, writes it as a total Lean 4 function, replays it once
-on the later half it has never seen, and returns one of seven verdicts with the evidence. If the log says what each run cost, it also says how many
+on the later half it has never seen, and returns one of six verdicts with the evidence. If the log says what each run cost, it also says how many
 tokens the replacement would save.
 
 | Verdict | Meaning |
@@ -103,6 +103,7 @@ Delete `scripts/witness/` and the skill is the rule-only skill. It needs large l
 ## Layout
     skills/replaceable/SKILL.md          the procedure the agent follows, the hard rules, the verdict table
     skills/replaceable/scripts/          prepare, run (= audit + replay + verdict), host_replay, selftest; fit, derive, thresholds, lean, stats
+    skills/replaceable/scripts/report.py     the compact block, report.md and report.html
     skills/replaceable/scripts/witness/   the optional learned check: boost (the learner) and exam (train, score once, keep the numbers)
     examples/                            five loops with a known answer, each with the verdict it must end in; check.sh runs them all
     test/                                unit tests that need no Lean: bound, verdict table, rule scan, solver, typing, tokens

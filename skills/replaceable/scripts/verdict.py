@@ -115,6 +115,7 @@ def build(state: dict[str, Any], receipt: dict[str, Any] | None, rule_src: str |
     verdict["scope"] = scope or state["triage"]["scope"]
     if verdict["scope"] == "decision_step_only":
       verdict["rationale"] += " Scope: the decision step on typed fields only; the extraction step that produces those fields stays probabilistic."
+  if name == "DETERMINISTIC_LEARNED": verdict["model"] = {k: receipt["model"][k] for k in ("n", "n_match", "lower_bound", "baseline")}
   if name == "INCONCLUSIVE" and ran and receipt["lower_bound"] < BOUND_DETERMINISTIC: verdict["rationale"] += weak_note(fit)
   if name == "INCONCLUSIVE" and (scan.get("near") or {}).get("neighbour_disagreement") is not None and ran:
     verdict["rationale"] += (f" Diagnostic: {scan['near']['neighbour_disagreement']:.0%} of early cases differ from their nearest neighbour (random "
@@ -197,4 +198,7 @@ if __name__ == "__main__":
   args = parser.parse_args()
   verdict = write(args.scope, args.note)
   stats.emit(verdict if "error" in verdict else {"written": "verdict.json", **verdict})
+  if "error" not in verdict:  # the reports follow a changed verdict (a --note)
+    import report
+    report.write(verdict)
   sys.exit(1 if "error" in verdict else 0)
