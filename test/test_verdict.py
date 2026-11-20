@@ -130,7 +130,7 @@ class TestReport(unittest.TestCase):  # the owner reads the answer and the token
     self.assertEqual(verdict.answer_line(always), "Answer: Yes, deterministic.")
     never = {"verdict": "PROBABILISTIC", "learning": {"converged": False, "runs": 900, "accuracy": 0.76, "examined_from": 450}}
     self.assertEqual(verdict.answer_line(never), "Answer: No, not deterministic. Its feedback never holds 95% (76% over its latest quarter): "
-                     "the latest part of the log was checked.")
+                     "its latest half was checked.")
   def test_the_learning_phase_is_priced_against_the_converged_loop(self):
     spend = {"known": True, "per_run": 1000.0, "logged": 300_000, "cases_with_tokens": 300,
              "learning": {"from_run": 1300, "accuracy_before": 0.85, "tokens": {"with_tokens": 1300, "mean": 2500.0}}}
@@ -150,10 +150,25 @@ class TestReport(unittest.TestCase):  # the owner reads the answer and the token
     ruled = {"triage": {"scope": "full"}, "fit": {"rule_sha256": stats.sha256("rule")}, "learning": {"unsettled": {"recent": 0.92, "before": 0.86}}}
     said = verdict.build(ruled, {"rule_sha256": stats.sha256("rule"), **report()}, "rule", None)
     self.assertEqual((said["verdict"], said["exit_stage"]), ("INCONCLUSIVE", "feedback"))
-    self.assertIn("92% right over its latest quarter, 86% the quarter before", said["rationale"])
+    self.assertIn("92% right over its latest quarter, 86% over the two before", said["rationale"])
     moving = {"verdict": "INCONCLUSIVE", "learning": {"converged": False, "runs": 900, "unsettled": {"recent": 0.92, "before": 0.86}}}
-    self.assertEqual(verdict.answer_line(moving), "Answer: Cannot tell from this log. Its feedback has not settled at 95% "
-                     "(92% over its latest quarter, 86% the quarter before): run this again once it holds.")
+    self.assertEqual(verdict.answer_line(moving), "Answer: Cannot tell from this log. Its feedback has not settled: "
+                     "92% right over its latest quarter, 86% over the two before. Run this again once it has held 95% for 150 runs.")
+  def test_after_max_rows_the_report_says_only_the_latest_runs_were_examined(self):
+    trimmed = {"converged": True, "runs": 6000, "from_run": 1300, "trimmed": True}
+    self.assertTrue(verdict.answer_line({"verdict": "DETERMINISTIC", "learning": trimmed}).endswith(" (--max-rows: only its latest runs.)"))
+    spent = {"with_tokens": 1300, "mean": 2500.0}
+    whole = {"with_tokens": 1000, "total": 1_000_000, "mean": 1000.0}
+    state = {"log_tokens": whole, "learning": {**trimmed, "accuracy_before": 0.7, "tokens": spent}}
+    block = verdict.token_block(state, None, {"verdict": "DETERMINISTIC"})
+    self.assertTrue(block["learning"]["trimmed"])
+    self.assertIn("over its 1,000 latest runs", verdict.tokens_line(block))
+  def test_a_moving_loop_does_not_hide_that_the_output_is_free_text(self):
+    moving = {"unsettled": {"recent": 0.9, "before": 0.7}}
+    exits = lambda name: {"triage": {"scope": "full"}, "proposed": {"verdict": name, "exit_stage": "x", "why": "w"},  # noqa: E731
+                          "conflicts": {"example_pairs": []}, "learning": moving}
+    self.assertEqual(verdict.build(exits("OUT_OF_SCOPE"), None, None, None)["verdict"], "OUT_OF_SCOPE")
+    self.assertEqual(verdict.build(exits("PROBABILISTIC"), None, None, None)["verdict"], "INCONCLUSIVE")  # conflicts across a change prove nothing
   def test_an_early_exit_quotes_the_whole_log_not_the_half_it_audited(self):
     half, whole = {"with_tokens": 5, "total": 50, "mean": 10.0}, {"with_tokens": 10, "total": 100, "mean": 10.0}
     block = verdict.token_block({"tokens": half, "log_tokens": whole}, None, {"verdict": "PROBABILISTIC"})

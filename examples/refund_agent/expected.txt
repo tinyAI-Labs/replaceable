@@ -1,3 +1,3 @@
 VERDICT: PROBABILISTIC
-Answer: No, not deterministic. Its feedback never holds 95% (81% over its latest quarter): the latest part of the log was checked.
-Tokens: this loop used 3,116 per run, 4,674,591 over its 1,500 runs in its latest part, at that pace about 33,702,056 a month.
+Answer: No, not deterministic. Its feedback never holds 95% (82% over its latest quarter): its latest half was checked.
+Tokens: this loop used 3,024 per run, 4,536,703 over its 1,500 runs in its latest half, at that pace about 32,708,211 a month.

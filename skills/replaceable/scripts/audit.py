@@ -146,6 +146,8 @@ def fit_rule(rows: list[stats.Row], schema: stats.Schema, types_path: Path, rule
 def next_step(state: dict[str, Any]) -> dict[str, str]:
   # what the procedure does next and why; `action` is verdict, broken, scope or replay. NOTE: a weak rule is not a stop: it goes to the replay.
   if "proposed" in state: return {"action": "verdict", "why": state["proposed"]["why"]}
+  if (state.get("learning") or {}).get("unsettled"):
+    return {"action": "verdict", "why": "The loop's feedback is still moving: no exam result is allowed to say more."}
   fit = state["fit"]
   if not fit["lean"].get("compiled") or "error" in fit["lean"]:
     return {"action": "broken", "why": "The fitted rule did not pass the check or could not be run on the early half. That is a fault of the "

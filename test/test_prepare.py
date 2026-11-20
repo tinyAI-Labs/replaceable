@@ -87,7 +87,7 @@ class TestPrepareLearning(unittest.TestCase):  # `correct` on every run sets the
   def test_a_loop_whose_feedback_is_still_moving_is_marked_unsettled(self):
     rising = lambda i: i % 5 >= 2 if i < 700 else i % 10 != 0  # noqa: E731  60%, then 90%: still rising
     _, _, meta = self.prepare(self.run_of(1000, rising))
-    self.assertEqual((meta["learning"]["converged"], meta["learning"]["unsettled"]), (False, {"recent": 0.9, "before": 0.66}))
+    self.assertEqual((meta["learning"]["converged"], meta["learning"]["unsettled"]), (False, {"recent": 0.9, "before": 0.63}))
     _, _, meta = self.prepare(self.run_of(100, lambda i: False))  # too short to have a learning phase at all
     self.assertNotIn("learning", meta)
   def test_flat_below_95_in_a_short_log_is_examined_whole(self):
@@ -96,6 +96,14 @@ class TestPrepareLearning(unittest.TestCase):  # `correct` on every run sets the
   def test_a_log_that_was_good_from_the_start_has_no_learning_phase(self):
     _, _, meta = self.prepare(self.run_of(600, lambda i: i % 25 != 0))  # 96% throughout
     self.assertNotIn("from_run", meta["learning"])
+  def test_a_dip_in_a_loop_that_was_right_all_along_is_not_a_learning_phase(self):
+    _, _, meta = self.prepare(self.run_of(3000, lambda i: not (2000 <= i < 2100 and i % 5 == 0)))  # one block at 80% in the middle of a perfect run
+    self.assertNotIn("from_run", meta["learning"])
+    self.assertEqual(meta["n_total"], 3000)
+  def test_after_max_rows_the_accuracy_is_that_of_the_runs_kept(self):
+    correct = lambda i: True if i >= 600 else (i % 5 >= 2 if i < 300 else i % 100 != 0)  # noqa: E731  learns, then three slips, then none
+    _, _, meta = self.prepare(self.run_of(1000, correct), "--max-rows", "400")
+    self.assertEqual((meta["learning"]["from_run"], meta["learning"]["accuracy"], meta["learning"]["trimmed"]), (300, 1.0, True))
   def test_the_learning_phase_is_found_before_max_rows_trims_the_log(self):
     code, _, meta = self.prepare(self.run_of(1000, lambda i: i >= 300 or i % 5 >= 2), "--max-rows", "400")
     self.assertEqual((code, meta["learning"]["from_run"], meta["learning"]["runs"], meta["n_total"]), (0, 300, 1000, 400))

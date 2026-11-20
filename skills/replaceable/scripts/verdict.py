@@ -19,16 +19,24 @@ ANSWERS = {
   "DETERMINISTIC_LEARNED": "Yes, deterministic (no readable rule).", "PROBABILISTIC": "No, not deterministic.",
   "INCONCLUSIVE": "Cannot tell from this log.", "OUT_OF_SCOPE": "Not applicable: the output is free text, not a typed decision."}
 
+def pct(share: float) -> str:
+  return f"{int(share * 100)}%"  # rounded down: a figure below the bar must not be shown as the bar
+
+def moving_text(moving: dict[str, float]) -> str:
+  now, was = moving["recent"], moving["before"]
+  if now >= stats.PLATEAU: return f"{pct(now)} right over its latest quarter, but not for long enough ({pct(was)} the two quarters before)"
+  return f"{pct(now)} right over its latest quarter, {pct(was)} over the two before"
+
 def answer_line(result: dict[str, Any]) -> str:
   # the answer, and when the log came with the loop's own feedback, which part of the log it is about
   learned, text = result.get("learning"), ANSWERS[result["verdict"]]
   if learned and learned.get("from_run"):
     text += f" Checked on the runs after the loop held 95% accuracy (after run {learned['from_run']:,} of {learned['runs']:,})."
   elif learned and learned.get("unsettled"):
-    now, was = learned["unsettled"]["recent"], learned["unsettled"]["before"]
-    text += f" Its feedback has not settled at 95% ({now:.0%} over its latest quarter, {was:.0%} the quarter before): run this again once it holds."
+    text += f" Its feedback has not settled: {moving_text(learned['unsettled'])}. Run this again once it has held 95% for {stats.MIN_TAIL} runs."
   elif learned and not learned["converged"]:
-    text += f" Its feedback never holds 95% ({learned['accuracy']:.0%} over its latest quarter): the latest part of the log was checked."
+    text += (f" Its feedback never holds 95% ({pct(learned['accuracy'])} over its latest quarter): "
+             f"{'its latest half' if learned['examined_from'] else 'the whole log'} was checked.")
   if learned and learned.get("trimmed"): text += " (--max-rows: only its latest runs.)"
   return f"Answer: {text}"
 
@@ -39,7 +47,7 @@ def tokens_line(tokens: dict[str, Any], usd: float | None = None, ask: bool = Tr
   if not tokens["known"]: return f"Tokens: not in this log.{tail}"
   learned = tokens.get("learning") or {}
   runs = ("latest runs" if learned.get("trimmed") else "runs after it converged" if "from_run" in learned
-          else "runs in its latest part" if "examined_from" in learned else "logged runs")
+          else "runs in its latest half" if learned.get("examined_from") else "logged runs")
   said = f"this loop used {tokens['per_run']:,.0f} per run, {tokens['logged']:,} over its {tokens['cases_with_tokens']:,} {runs}"
   if "per_month" in tokens: said += f", at that pace about {tokens['per_month']:,} a month"
   spent = learned.get("tokens") or {}  # what a budget made from the converged cost leaves out, once both phases are long enough to compare
@@ -78,12 +86,11 @@ def verdict_from_replay(replay: dict[str, Any]) -> tuple[str, str]:
 
 def build(state: dict[str, Any], receipt: dict[str, Any] | None, rule_src: str | None, scope: str | None) -> dict[str, Any]:
   # the verdict object, or {"error": ..., "needs": the missing step} when it cannot be given yet
-  moving = (state.get("learning") or {}).get("unsettled")
-  if moving:  # NOTE: a policy that is still being corrected cannot be tested, so no exam result is allowed to say anything about it
+  moving, proposed = (state.get("learning") or {}).get("unsettled"), state.get("proposed")
+  if moving and (proposed or {}).get("verdict") != "OUT_OF_SCOPE":  # NOTE: a policy still being corrected cannot be tested, whatever an exam says
     return {"verdict": "INCONCLUSIVE", "exit_stage": "feedback", "rationale": (
-      f"The loop's feedback has not settled: {moving['recent']:.0%} right over its latest quarter, {moving['before']:.0%} the quarter before. "
-      "A policy that is still being corrected has nothing fixed to replace; run the check again once the loop has held 95% for 150 or more runs.")}
-  proposed = state.get("proposed")
+      f"The loop's feedback has not settled: {moving_text(moving)}. A policy that is still being corrected has nothing fixed to replace; run the "
+      f"check again once the loop has held 95% for {stats.MIN_TAIL} or more runs.")}
   if proposed:  # triage or conflicts exit: no rule is involved
     verdict = {"verdict": proposed["verdict"], "exit_stage": proposed["exit_stage"], "rationale": proposed["why"]}
     if proposed["verdict"] == "PROBABILISTIC":

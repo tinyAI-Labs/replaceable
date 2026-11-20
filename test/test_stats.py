@@ -1,5 +1,5 @@
 # the bound, the baseline, the conflict scan and the token counts
-import sys, unittest
+import random, sys, unittest
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "skills" / "replaceable" / "scripts"))
 import stats
@@ -83,6 +83,14 @@ class TestConvergedFrom(unittest.TestCase):  # where a self-optimizing loop sett
 class TestUnsettled(unittest.TestCase):  # a loop that does not hold 95%: moving (nothing to test yet) or flat (examined as it is)
   def test_a_flat_loop_is_not_moving(self):
     self.assertIsNone(stats.unsettled([i % 5 != 0 for i in range(2000)]))  # 80% throughout
+    rng = random.Random(7)  # noise alone must rarely look like movement: 200 flat loops at 81%
+    moved = sum(stats.unsettled([rng.random() < 0.81 for _ in range(3000)]) is not None for _ in range(200))
+    self.assertLess(moved, 12)
+  def test_a_slow_steady_rise_is_moving_though_the_last_two_quarters_differ_by_two_points(self):
+    quarters = [[False] * wrong + [True] * (750 - wrong) for wrong in (129, 101, 83, 67)]  # 82.8%, 86.5%, 88.9%, 91.1%
+    self.assertIsNotNone(stats.unsettled([run for quarter in quarters for run in quarter]))
+  def test_a_log_too_short_for_quarters_has_nothing_to_say(self):
+    self.assertIsNone(stats.unsettled([True, False, True]))
   def test_a_rising_loop_a_falling_one_and_one_back_at_95_are_moving(self):
     rising = [i % 5 >= 2 for i in range(750)] + [i % 10 != 0 for i in range(250)]  # 60% then 90%
     self.assertEqual(stats.unsettled(rising), (0.9, 0.6))

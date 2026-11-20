@@ -30,6 +30,7 @@ The `Tokens:` line is always printed; the arithmetic is printed only with `run.p
 | Evidence | Verdict |
 |---|---|
 | Output has no fixed set of values (free text) | OUT_OF_SCOPE |
+| The log carries `correct` and the loop's feedback is still moving (rising or falling over its latest quarters, or at 95% for fewer than 150 runs): no exam is read | INCONCLUSIVE |
 | Under 150 logged cases | INCONCLUSIVE |
 | Identical inputs, different outputs: over 5% of the early cases whose input repeats, for 2 or more inputs | PROBABILISTIC |
 | Replay: all outputs equal, L >= 0.95 | CONSTANT |

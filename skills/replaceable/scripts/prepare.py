@@ -166,25 +166,28 @@ def main():
     if found is not None:
       tail = sum(correct[found:]) / (len(rows) - found)
       before = sum(correct[:found]) / found if found else tail
-      if tail - before < 0.03: found = 0  # not clearly worse before: there was no learning phase to set aside
+      if before >= stats.PLATEAU: found = 0  # a dip in a loop that was right all along is not a learning phase: nothing is set aside
       learning = {"converged": True, "runs": len(rows), "accuracy": round(tail, 3)}
       if found:
         learning |= {"from_run": found, "accuracy_before": round(before, 3), "tokens": stats.token_stats(rows[:found])}
         notes.append(f"the loop held 95% accuracy after run {found} of {len(rows)}: those {found} runs are its learning phase, the rest is examined")
         rows = rows[found:]
     else:  # it does not hold 95%: a flat loop is examined on its latest half (the least marked by what it learned early), a moving one only reported
-      start = len(rows) // 2 if len(rows) // 2 >= stats.MIN_TAIL else 0
+      start = len(rows) // 2 if len(rows) // 2 >= 2 * stats.MIN_TAIL else 0  # each half must be long enough to be examined
       moving = stats.unsettled(correct)
       quarter = len(correct) // 4
       learning = {"converged": False, "runs": len(rows), "accuracy": round(sum(correct[-quarter:]) / quarter, 3), "examined_from": start}
       if moving: learning["unsettled"] = {"recent": round(moving[0], 3), "before": round(moving[1], 3)}
       notes.append("the loop's feedback has not settled: it is reported as INCONCLUSIVE" if moving else
-                   f"the loop's feedback never holds 95% ({learning['accuracy']:.0%} over its latest quarter): its latest part is examined")
+                   f"the loop's feedback never holds 95% ({learning['accuracy']:.0%} over its latest quarter): "
+                   f"{'its latest half' if start else 'the whole log'} is examined")
       rows = rows[start:]
   if args.max_rows and len(rows) > args.max_rows:
     notes.append(f"kept the latest {args.max_rows} of {len(rows)} cases (--max-rows)")
     rows = rows[-args.max_rows:]
-    if learning: learning |= {"trimmed": True, "accuracy": round(sum(r["correct"] for r in rows) / len(rows), 3)}
+    if learning:
+      learning["trimmed"] = True
+      if learning["converged"]: learning["accuracy"] = round(sum(r["correct"] for r in rows) / len(rows), 3)
   elif len(rows) > LARGE_LOG:
     notes.append(f"{len(rows)} cases: the fit and the Lean runs may take minutes or time out; --max-rows {LARGE_LOG} keeps the latest {LARGE_LOG}")
 

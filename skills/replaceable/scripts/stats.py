@@ -122,11 +122,19 @@ def converged_from(correct: Sequence[bool]) -> int | None:
   return start if n - start >= MIN_TAIL else None
 
 def unsettled(correct: Sequence[bool]) -> tuple[float, float] | None:
-  # for a loop that does not hold 95%: (latest quarter, the quarter before) if its feedback is still moving (rising, falling, or back at 95% too
-  # recently to count), None if it is flat. A moving loop has no policy to test yet; a flat one is examined as it is
+  # for a loop that does not hold 95%: (latest quarter, the two quarters before it) if its feedback is still moving, None if it is flat. Moving: the
+  # latest quarter is at 95% (a spell too recent to count), or it differs from the quarter two back, or from the two before it, by at least 2 points
+  # and by more than 2.5 standard errors of that difference (the first quarter is left out: a loop learns most of its policy early, then goes flat).
+  # A moving loop has no policy to test yet; a flat one is examined as it is
   quarter = len(correct) // 4
-  recent, before = (sum(part) / quarter for part in (correct[-quarter:], correct[-2 * quarter:-quarter]))
-  return (recent, before) if recent >= PLATEAU or abs(recent - before) > 0.03 else None
+  if quarter == 0: return None
+  share = lambda part: sum(part) / len(part)  # noqa: E731
+  recent, two_back, between = (share(correct[-k * quarter:][:quarter]) for k in (1, 3, 2))
+  before = (two_back + between) / 2
+  def moved(other, weight):  # weight: how many quarters `other` spans, for the standard error of the difference
+    pooled = (recent + weight * other) / (1 + weight)
+    return abs(recent - other) >= max(0.02, 2.5 * sqrt(pooled * (1 - pooled) * (1 + 1 / weight) / quarter))
+  return (recent, before) if recent >= PLATEAU or moved(two_back, 1) or moved(before, 2) else None
 
 def runs_per_day(rows: Sequence[Row]) -> float | None:
   # the pace a token count is extrapolated at; None unless `ts` are ISO timestamps that span a day (a counter, or no ts, says nothing about time)

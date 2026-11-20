@@ -11,6 +11,11 @@ def triage(n, schema=SCHEMA, output="approve", amount=5, **more):
   cases = [{"case_id": f"c{i}", "typed_input": {"amount": amount, "vip": True, "tier": "gold"}, "output": output, **more} for i in range(n)]
   return audit.triage(cases, schema, {"n_total": 2 * n}, Path("no-such-file"), None, None)
 
+class TestNextStep(unittest.TestCase):
+  def test_a_loop_whose_feedback_is_still_moving_goes_straight_to_the_verdict(self):  # no rule check, scope question or replay can change it
+    step = audit.next_step({"learning": {"unsettled": {"recent": 0.9, "before": 0.7}}})
+    self.assertEqual(step["action"], "verdict")
+
 class TestTriage(unittest.TestCase):
   def test_case_count(self):
     self.assertNotIn("exit", triage(75))
