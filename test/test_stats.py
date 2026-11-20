@@ -57,4 +57,16 @@ class TestTokens(unittest.TestCase):
                      {"cases": 11, "with_tokens": 10, "total": 55, "mean": 5.5, "median": 5.5, "p90": 9})
     self.assertEqual(stats.token_stats([{}, {}]), {"cases": 2, "with_tokens": 0})
 
+class TestRunsPerDay(unittest.TestCase):  # the pace a token count is extrapolated at: only real timestamps say how long the log took
+  def rows(self, *ts): return [{"case_id": f"c{i}", "ts": t} for i, t in enumerate(ts)]
+  def test_iso_timestamps_give_runs_per_day(self):
+    self.assertEqual(stats.runs_per_day(self.rows("2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", "2026-01-03T00:00:00Z")), 1.5)  # 3 runs in 2 days
+  def test_a_counter_a_missing_or_an_odd_timestamp_gives_nothing(self):
+    for ts in ((0, 1, 2), ("2026-01-01", "soon"), (None, None), ("2026-01-01T00:00:00Z", "2026-01-02T00:00:00")):  # the last mixes zone and no zone
+      self.assertIsNone(stats.runs_per_day(self.rows(*ts)), ts)
+    self.assertIsNone(stats.runs_per_day([{"case_id": "c0"}, {"case_id": "c1"}]))
+    self.assertIsNone(stats.runs_per_day([]))
+  def test_under_a_day_is_too_short_to_extrapolate(self):
+    self.assertIsNone(stats.runs_per_day(self.rows("2026-01-01T00:00:00Z", "2026-01-01T12:00:00Z")))
+
 if __name__ == "__main__": unittest.main()

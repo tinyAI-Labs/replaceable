@@ -1,6 +1,7 @@
 # statistics, the thresholds of the procedure and the small file helpers every script shares (standard library only)
 from __future__ import annotations
 import hashlib, json, os, sys, zlib
+from datetime import datetime
 from collections import Counter
 from math import ceil, exp, lgamma, log, log1p
 from pathlib import Path
@@ -102,6 +103,13 @@ def token_stats(rows: Sequence[Row]) -> dict[str, Any]:
   if not counts: return {"cases": len(rows), "with_tokens": 0}
   return {"cases": len(rows), "with_tokens": len(counts), "total": sum(counts), "mean": round(sum(counts) / len(counts), 1),
           "median": median(counts), "p90": counts[ceil(0.9 * len(counts)) - 1]}
+
+def runs_per_day(rows: Sequence[Row]) -> float | None:
+  # the pace a token count is extrapolated at; None unless `ts` are ISO timestamps that span a day (a counter, or no ts, says nothing about time)
+  try: times = sorted(datetime.fromisoformat(r["ts"]) for r in rows)
+  except (KeyError, TypeError, ValueError): return None
+  days = (times[-1] - times[0]).total_seconds() / 86400 if times else 0
+  return len(times) / days if days >= 1 else None
 
 # *** statistics ***
 

@@ -11,12 +11,20 @@ from audit import AUDIT_COMMAND, AUDIT_FILE, REPLAY_COMMAND, RUN_COMMAND, VERDIC
 
 SCOPED = ("DETERMINISTIC", "DETERMINISTIC_CORE_FALLBACK", "DETERMINISTIC_TINYAI", "CONSTANT")
 
-SIGNUP = "Do you want to reduce your token spend for this agentic loop to zero? Sign up here: https://forms.gle/Wg8fFDhCu84mF8Mu7"
-# NOTE: the owner's whole report, one answer per verdict. How the verdict came about (VERDICT, WHY, TOKENS) is printed only when they ask why.
+ASK = "Do you want to reduce your token spend for this agentic loop to zero? Find out how: https://tinyailabs.com/"
+# NOTE: the owner's whole report is two lines: one answer per verdict and what the loop spends. How the verdict came about is printed only on --why.
 ANSWERS = {
   "DETERMINISTIC": "Yes, deterministic.", "DETERMINISTIC_CORE_FALLBACK": "Mostly deterministic.", "DETERMINISTIC_TINYAI": "Yes, deterministic.",
   "CONSTANT": "Yes, constant.", "PROBABILISTIC": "No, not deterministic.", "INCONCLUSIVE": "Cannot tell from this log.",
   "OUT_OF_SCOPE": "Not applicable: the output is free text, not a typed decision."}
+
+def tokens_line(tokens: dict[str, Any], usd: float | None = None) -> str:
+  # the second line: what the loop spends, from the log's own counts (a price only if given, a pace only if the log has dates), then the question
+  if not tokens["known"]: return f"Tokens: not in this log. {ASK}"
+  said = f"this loop used {tokens['per_run']:,.0f} per run, {tokens['logged']:,} over its {tokens['cases_with_tokens']:,} logged runs"
+  if "per_month" in tokens: said += f", at that pace about {tokens['per_month']:,} a month"
+  total, span = (tokens["per_month"], "a month") if "per_month" in tokens else (tokens["logged"], "over the logged runs")
+  return f"Tokens: {said}" + (f" (about ${total * usd / 1e6:,.2f} {span} at ${usd:g} per million tokens)" if usd else "") + f". {ASK}"
 
 def verdict_from_replay(replay: dict[str, Any]) -> tuple[str, str]:
   # NOTE: (verdict, reason) for a replay report or receipt. L is the exact one-sided 95% lower bound on the held-out agreement. The rows
@@ -107,6 +115,7 @@ def token_block(state: dict[str, Any], receipt: dict[str, Any] | None, verdict: 
   mean = round(total / n, 1)
   block = {"known": True, "per_run": mean, "logged": total, "cases_with_tokens": n, "halves": halves, "rule_share": share,
            "saved_per_run": round(share * mean, 1), "saved_logged": round(share * total)}
+  if state.get("runs_per_day"): block["per_month"] = round(mean * state["runs_per_day"] * 30)  # at the pace of the early half of the log
   block["arithmetic"] = (f"{total} tokens / {n} runs with a count ({' + '.join(halves)} half) = {mean} per run; rule share {share} ({why}); saved "
                          f"per run = {share} x {mean} = {block['saved_per_run']}; saved over the log = {share} x {total} = {block['saved_logged']}")
   if share and verdict.get("scope") == "decision_step_only":
@@ -125,8 +134,9 @@ def write(scope: str | None = None, note: str | None = None, rule="Rule.lean", o
   stats.write_text_atomic(Path(out), json.dumps(verdict, indent=2))
   return verdict
 
-def conclude(scope: str | None = None, note: str | None = None, why: bool = False) -> int:
-  # write verdict.json and print the answer and the sign-up line; with `why` first how the procedure ended (VERDICT, WHY, TOKENS, NEXT).
+def conclude(scope: str | None = None, note: str | None = None, why: bool = False, usd: float | None = None) -> int:
+  # write verdict.json and print the answer and the token line (priced at `usd` per million tokens, if given); with `why` first how the
+  # procedure ended (VERDICT, WHY, TOKENS, NEXT).
   # Returns the exit code, 1 when no verdict could be written.
   result = write(scope, note)
   if "error" in result:
@@ -142,7 +152,7 @@ def conclude(scope: str | None = None, note: str | None = None, why: bool = Fals
     print("NEXT: nothing to run; verdict.json is written. Report it as it is." + (
       " A person confirms that Rule.lean matches the written policy before it replaces the loop."
       if "scope" in result and result["verdict"] != "DETERMINISTIC_TINYAI" else ""))
-  print(f"Answer: {ANSWERS[result['verdict']]}\nSignup: {SIGNUP}")
+  print(f"Answer: {ANSWERS[result['verdict']]}\n{tokens_line(result['tokens'], usd)}")
   return 0
 
 if __name__ == "__main__":

@@ -192,7 +192,7 @@ def audit(log="logs/early.jsonl", heldout="logs/heldout.jsonl", schema="schema.j
     raise SystemExit(1)
   state: dict[str, Any] = {"early_sha256": early_sha, "scope_choice": scope, "derive": kept, "derive_tried": tried, "derive_runs": len(tried),
                            "triage": triage(rows, schema_, stats.read_json(metadata), Path(heldout), n_total, scope),
-                           "tokens": stats.token_stats(rows)}
+                           "tokens": stats.token_stats(rows), "runs_per_day": stats.runs_per_day(rows)}
   if "exit" not in state["triage"]: state["conflicts"] = conflicts(rows, schema_)
   if "exit" not in state.get("conflicts", {"exit": 1}):
     lean.require_lean()
