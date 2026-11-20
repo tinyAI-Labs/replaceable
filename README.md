@@ -83,15 +83,14 @@ was made from, and the decision. From a trace or message-list export, roughly:
 
 ## Tokens and savings
 Log a token count per run as `tokens` (the run's total), or as the SDKs report it: `usage.input_tokens` + `usage.output_tokens` (cache tokens are
-added), `prompt_tokens` + `completion_tokens`, or `total_tokens`. The verdict then carries a `tokens` block and a `TOKENS:` line: tokens per run,
-the total over the log, the share of runs the rule would take over (all for `DETERMINISTIC` and `CONSTANT`, none otherwise: `DETERMINISTIC_LEARNED`
-hands over no rule) and the tokens saved, with the arithmetic spelled out, e.g.
+added), `prompt_tokens` + `completion_tokens`, or `total_tokens`. The `Tokens:` line then quotes the tokens per run and over the log, and a monthly
+pace when the log's `ts` are ISO timestamps that span at least a day (at the pace of the early half; a counter says nothing about time). It quotes a
+cost only when you give a price: `run.py --usd-per-mtok 3` (what you pay per million tokens, one blended rate); the skill has no price table.
 
-    TOKENS: 691600 tokens / 800 runs with a count (early + heldout half) = 864.5 per run; rule share 1.0 (DETERMINISTIC: the rule takes
-    over every run); saved per run = 1.0 x 864.5 = 864.5; saved over the log = 1.0 x 691600 = 691600
-
-Without a count the answer is `unknown`: nothing is estimated from text length, because a log line shows the source material at best, not the prompt,
-the tool calls or the retries. Token counts never reach the rule or the verdict. The `Tokens:` line quotes the tokens per run and over the log, and a monthly pace when the log's `ts` are ISO timestamps that span at least a day (at the pace of the early half; a counter says nothing about time). It quotes a cost only when you give a price: `run.py --usd-per-mtok 3` (what you pay per million tokens, one blended rate); the skill has no price table.
+`--why` adds the `TOKENS:` line and the `tokens` block of `verdict.json`: the share of runs a rule would take over (all for `DETERMINISTIC` and
+`CONSTANT`, none otherwise: `DETERMINISTIC_LEARNED` hands over no rule) and
+the tokens saved, with the arithmetic spelled out. Without a count the answer is `unknown`: nothing is estimated from text length, because a log line
+shows the source material at best, not the prompt, the tool calls or the retries. Token counts never reach the rule or the verdict.
 
 ## The learned check
 A rule is limited to 16 branches so a person can read it. Some loops are a function of their inputs and still have more branches than that. For those
@@ -120,7 +119,7 @@ This is an alpha: the verdicts are conservative and the edges are rough. What he
 
 - **Send:** an issue with `verdict.json` and the `WHY:` line, and whether the verdict matches what you know about the loop.
 - **Do not send:** logs, `Rule.lean` or `schema.json`: they carry your field names and your policy.
-- **Limits:** typed decisions only (free text is `OUT_OF_SCOPE`); 150 runs at least, about 1000 or more for many-branch policies; `INCONCLUSIVE`
+- **Limits:** typed decisions only (free text is `OUT_OF_SCOPE`); enough runs (see *Your own log*); `INCONCLUSIVE`
   is common and safe (it never means "probabilistic"); macOS and Linux only (POSIX); Python 3.12+ and Lean 4 are required; the rule scan is not an
   OS sandbox (`SECURITY.md`); a person signs off `Rule.lean` against the written policy before it replaces anything.
 - **Update:** `/plugin marketplace update tinyai-labs`. No telemetry: the scripts make no network calls.
