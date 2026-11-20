@@ -31,10 +31,10 @@ For another agent, copy `skills/replaceable/` to where it keeps skills. Then che
 Give the agent a log and ask whether the loop is replaceable, or run the two commands yourself, in the directory that holds the log:
 
     python3 $S/prepare.py raw.jsonl   # types the log, splits it by time into logs/early.jsonl and logs/heldout.jsonl
-    python3 $S/run.py                 # audit, one-shot replay, verdict: ends with an Answer and a Signup line (add --why for VERDICT / WHY / TOKENS)
+    python3 $S/run.py                 # audit, one-shot replay, verdict: ends with an Answer and a Tokens line (add --why for VERDICT / WHY / TOKENS)
 
 To try it first, copy `examples/shipping/raw.jsonl` (600 runs of a shipping loop) into an empty directory: the output ends with
-`Answer: Yes, deterministic.` and a `Signup:` line. Add `--why` to `run.py` (it resumes, nothing is replayed again) to also see the `VERDICT:`, `WHY:` and `TOKENS:` lines; an agent running the skill prints them only if you ask why. Nine more examples are below.
+`Answer: Yes, deterministic.` and a `Tokens:` line with what the loop spends. Add `--why` to `run.py` (it resumes, nothing is replayed again) to also see the `VERDICT:`, `WHY:` and `TOKENS:` lines; an agent running the skill prints them only if you ask why. Nine more examples are below.
 
 `raw.jsonl` has one logged run per line: `{"typed_input": {...}, "output": ..., "ts": ..., "tokens": 1840}`. `typed_input` holds numbers, booleans,
 dates and categories; `ts`, `case_id` and the token count are optional. At least 150 runs are needed. `run.py` asks at most one question (the scope:
@@ -88,7 +88,7 @@ for `DETERMINISTIC_CORE_FALLBACK`, none otherwise: `DETERMINISTIC_TINYAI` hands 
     the fallback region; the rest stays with the LLM); saved per run = 0.8775 x 864.5 = 758.6; saved over the log = 0.8775 x 691600 = 606879
 
 Without a count the answer is `unknown`: nothing is estimated from text length, because a log line shows the source material at best, not the prompt,
-the tool calls or the retries. Token counts never reach the rule or the verdict. Prices are out of scope: multiply by your own rate.
+the tool calls or the retries. Token counts never reach the rule or the verdict. The `Tokens:` line quotes the tokens per run and over the log, and a monthly pace when the log's `ts` are ISO timestamps that span at least a day (at the pace of the early half; a counter says nothing about time). It quotes a cost only when you give a price: `run.py --usd-per-mtok 3` (what you pay per million tokens, one blended rate); the skill has no price table.
 
 ## The tiny model
 A rule is limited to 16 branches so a person can read it. Some loops are a function of their inputs and still have more branches than that. For those
@@ -122,4 +122,4 @@ This is an alpha: the verdicts are conservative and the edges are rough. What he
   is common and safe (it never means "probabilistic"); macOS and Linux only (POSIX); Python 3.12+ and Lean 4 are required; the rule scan is not an
   OS sandbox (`SECURITY.md`); a person signs off `Rule.lean` against the written policy before it replaces anything.
 - **Update:** `/plugin marketplace update tinyai-labs`. No telemetry: the scripts make no network calls.
-- **Join the alpha:** [sign up here](https://forms.gle/Wg8fFDhCu84mF8Mu7) to hear about updates.
+- **More:** [tinyailabs.com](https://tinyailabs.com/).

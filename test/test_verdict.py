@@ -111,11 +111,30 @@ class TestReport(unittest.TestCase):  # the owner reads the answer and the sign-
     for name, state, held in (("DETERMINISTIC", ruled, receipt()), ("DETERMINISTIC_TINYAI", ruled, receipt(k=100, **model())),
                               ("INCONCLUSIVE", ruled, receipt(k=100)), ("PROBABILISTIC", exits("PROBABILISTIC", "conflicts"), None),
                               ("OUT_OF_SCOPE", exits("OUT_OF_SCOPE", "triage"), None)):
-      self.assertEqual(self.conclusion(state, held), [f"Answer: {verdict.ANSWERS[name]}", f"Signup: {verdict.SIGNUP}"], name)
+      self.assertEqual(self.conclusion(state, held), [f"Answer: {verdict.ANSWERS[name]}", verdict.tokens_line({"known": False})], name)
       why = self.conclusion(state, held, why=True)  # asked why: the verdict, reasons and tokens come first; the answer and sign-up still end it
-      self.assertEqual(why[-2:], [f"Answer: {verdict.ANSWERS[name]}", f"Signup: {verdict.SIGNUP}"], name)
+      self.assertEqual(why[-2:], [f"Answer: {verdict.ANSWERS[name]}", verdict.tokens_line({"known": False})], name)
       self.assertTrue(any(line.startswith(f"VERDICT: {name}") for line in why) and any(line.startswith("WHY:") for line in why), name)
-    self.assertTrue(verdict.SIGNUP.startswith("Do you want to reduce your token spend for this agentic loop to zero? Sign up here: https://forms.gle/"))
+  def test_without_a_token_count_the_line_says_so_and_asks(self):
+    self.assertEqual(verdict.tokens_line({"known": False}),
+                     "Tokens: not in this log. Do you want to reduce your token spend for this agentic loop to zero? Find out how: https://tinyailabs.com/")
+  def test_with_a_token_count_the_line_quotes_the_spend(self):
+    spend = {"known": True, "per_run": 864.5, "logged": 518_700, "cases_with_tokens": 600}
+    line = verdict.tokens_line(spend)
+    self.assertTrue(line.startswith("Tokens: this loop used 864 per run, 518,700 over its 600 logged runs"), line)
+    self.assertNotIn("a month", line)  # no real timestamps, no pace
+    self.assertNotIn("$", line)  # no price, no cost: nothing is assumed
+    self.assertTrue(line.endswith("Do you want to reduce your token spend for this agentic loop to zero? Find out how: https://tinyailabs.com/"))
+    month = verdict.tokens_line({**spend, "per_month": 1_120_000}, usd=3)
+    self.assertIn("at that pace about 1,120,000 a month (about $3.36 a month at $3 per million tokens)", month)
+    self.assertIn("(about $1.56 over the logged runs at $3 per million tokens)", verdict.tokens_line(spend, usd=3))
+  def test_the_conclusion_quotes_the_logged_tokens_and_the_price_it_was_given(self):
+    ruled = {"triage": {"scope": "full"}, "fit": {"rule_sha256": stats.sha256("rule")}, "tokens": stats.token_stats([{"tokens": 1000}] * 100),
+             "runs_per_day": 10.0}
+    held = {"rule_sha256": stats.sha256("rule"), "tokens": stats.token_stats([{"tokens": 1200}] * 100), **report()}
+    line = self.conclusion(ruled, held, usd=2)[-1]
+    self.assertIn("1,100 per run, 220,000 over its 200 logged runs", line)
+    self.assertIn("at that pace about 330,000 a month (about $0.66 a month at $2 per million tokens)", line)
 
 class TestTokenBlock(unittest.TestCase):
   def block(self, name, early=None, receipt=None, **more): return verdict.token_block({"tokens": early}, receipt, {"verdict": name, **more})
@@ -133,6 +152,11 @@ class TestTokenBlock(unittest.TestCase):
       self.assertEqual([self.block(name, early)[k] for k in ("saved_logged", "logged")], [0, 100_000])
     self.assertIn("upper bound", self.block("DETERMINISTIC", early, receipt, scope="decision_step_only")["note"])
     self.assertNotIn("note", full)
+  def test_a_monthly_pace_needs_runs_per_day(self):
+    early, receipt = stats.token_stats([{"tokens": 1000}] * 100), {"n_heldout": 100, "tokens": stats.token_stats([{"tokens": 1200}] * 100)}
+    paced = verdict.token_block({"tokens": early, "runs_per_day": 10.0}, receipt, {"verdict": "DETERMINISTIC"})
+    self.assertEqual(paced["per_month"], 330_000)  # 1100 per run x 10 runs a day x 30 days
+    self.assertNotIn("per_month", self.block("DETERMINISTIC", early, receipt))
   def test_unknown_without_counts(self):
     for state_tokens, receipt in ((None, None), (stats.token_stats([{}]), {"n_heldout": 100})):
       self.assertEqual(self.block("DETERMINISTIC", state_tokens, receipt)["known"], False)

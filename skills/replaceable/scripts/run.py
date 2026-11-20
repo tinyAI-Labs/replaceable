@@ -1,6 +1,6 @@
 # the whole procedure in one command: the audit of the early half, the one-shot held-out replay, the verdict
 # usage: python3 scripts/run.py [--scope full|decision_step_only] [--derive "x.account_no % 10"]... [--note "..."] [--why]
-# NOTE: it runs every step itself and ends with the `Answer:` and `Signup:` lines; `--why` adds the audit, the replay report and the
+# NOTE: it runs every step itself and ends with the `Answer:` and `Tokens:` lines; `--why` adds the audit, the replay report and the
 # `VERDICT:`, `WHY:` and `TOKENS:` lines before them. A weak rule is not a question: it takes the exam as it is and ends
 # INCONCLUSIVE. Before the verdict it stops only where it cannot go on alone, with the exact command to continue (NEXT) and the reason
 # (WHY): the scope is undeclared; a --derive expression is not valid Lean; or the host
@@ -38,6 +38,7 @@ def main():
                       help='a quantity you know the policy uses, as a Nat-valued Lean expression of x, e.g. "x.account_no %% 10"; repeatable')
   parser.add_argument("--note", default=None, help="your own remark, appended to the verdict's rationale")
   parser.add_argument("--why", action="store_true", help="also print the audit, the replay, VERDICT, WHY, TOKENS (default: answer and sign-up only)")
+  parser.add_argument("--usd-per-mtok", type=float, default=None, help="what you pay per million tokens: the answer then quotes the cost too")
   args = parser.parse_args()
 
   if replay.read_receipt() is None:  # before the exam
@@ -63,6 +64,6 @@ def main():
       if args.why: stats.emit(report, trim=("counterexamples",))
       if replay.read_receipt() is None:  # refused without using the replay
         stop(audit.next_line({"action": "broken"}, via_run=True), f"The replay did not run: {report.get('error')}.", 1)
-  sys.exit(verdict.conclude(args.scope, args.note, args.why))
+  sys.exit(verdict.conclude(args.scope, args.note, args.why, args.usd_per_mtok))
 
 if __name__ == "__main__": main()
