@@ -12,7 +12,7 @@ from audit import AUDIT_COMMAND, AUDIT_FILE, REPLAY_COMMAND, RUN_COMMAND, VERDIC
 SCOPED = ("DETERMINISTIC", "DETERMINISTIC_LEARNED", "CONSTANT")
 
 ASK = "Do you want to reduce your token spend for this agentic loop to zero? Find out how: https://tinyailabs.com/"
-# NOTE: the owner's whole report is two lines: one answer per verdict and what the loop spends. How the verdict came about is printed only on --why.
+# NOTE: the owner's report is a few lines: the loop, the answer, what it spends and the question. How the verdict came about is printed only on --why.
 MIN_PHASE = 30  # runs a phase needs before its token cost is compared with the other's
 ANSWERS = {
   "DETERMINISTIC": "Yes, deterministic.", "CONSTANT": "Yes, constant.",
@@ -55,7 +55,7 @@ def tokens_line(tokens: dict[str, Any], usd: float | None = None) -> str:
   runs = ("latest runs" if learned.get("trimmed") else "runs after it converged" if "from_run" in learned
           else "runs in its steady stretch" if learned.get("examined_from") else "logged runs")
   total = tokens.get("per_month") or tokens["logged"]
-  over = f"about {total:,} a month" if "per_month" in tokens else f"{total:,} over its {tokens['cases_with_tokens']:,} {runs}"
+  over = f"about {total:,} a month" if tokens.get("per_month") else f"{total:,} over its {tokens['cases_with_tokens']:,} {runs}"
   said = f"{tokens['per_run']:,.0f} per run, {over}"
   if usd: said += f" (about ${total * usd / 1e6:,.2f} at ${usd:g} per million tokens)"
   if cost := learning_cost(tokens):  # what a budget made from the converged cost leaves out
@@ -170,8 +170,9 @@ def write(scope: str | None = None, note: str | None = None, rule="Rule.lean", o
     verdict["loop"] = {"reads": stats.decision_fields(schema), "answers": schema["output"]["values"]}
   fit = state.get("fit", {})
   if verdict["verdict"] in ("DETERMINISTIC", "CONSTANT") and fit.get("rules"):  # the rule that was examined, its main branches
-    names = {k: e.replace("x.", "") for k, e in fit.get("derived", {}).get("expressions", {}).items()}
+    names = fit.get("derived", {}).get("meaning", {})  # "derived0" -> "month of signed"
     verdict["rules"] = [{**r, "when": re.sub(r"\bderived\d+\b", lambda m: names.get(m.group(), m.group()), r["when"])} for r in fit["rules"]]
+    verdict["rules_rest"] = fit["rules_rest"]
   stats.write_text_atomic(Path(out), json.dumps(verdict, indent=2))
   return verdict
 

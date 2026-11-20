@@ -83,7 +83,7 @@ was made from, and the decision. From a trace or message-list export, roughly:
 
 ## Tokens and savings
 Log a token count per run as `tokens` (the run's total), or as the SDKs report it: `usage.input_tokens` + `usage.output_tokens` (cache tokens are
-added), `prompt_tokens` + `completion_tokens`, or `total_tokens`. The `Tokens:` line then quotes the tokens per run and over the log, and a monthly
+added), `prompt_tokens` + `completion_tokens`, or `total_tokens`. The `Tokens:` line then quotes the tokens per run, and a monthly
 pace when the log's `ts` are ISO timestamps that span at least a day (at the pace of the early half; a counter says nothing about time). It quotes a
 cost only when you give a price: `run.py --usd-per-mtok 3` (what you pay per million tokens, one blended rate); the skill has no price table.
 

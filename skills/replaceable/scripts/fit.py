@@ -232,26 +232,37 @@ class Fitter:
     return self._prune(root), root
 
 def plain_when(path: Conds, schema: Schema) -> str:
-  # the conditions on the way to a leaf, in words and one clause per field: "category is bug or outage and tier is not enterprise"
+  # the conditions on the way to a leaf, in words and one clause per field: "category is one of bug, outage and tier is not enterprise"
   values = {field["name"]: field.get("values", []) for field in schema["input"]}
+  dates = {field["name"] for field in schema["input"] if str(field.get("unit", "")).startswith("calendar date")}
+  show = lambda name, n: f"{n // 10000}-{n // 100 % 100:02d}-{n % 100:02d}" if name in dates else f"{n:,}"  # noqa: E731
   allowed: dict[str, list[str]] = {}
   bounds: dict[str, list[int | None]] = {}  # number field -> [lowest, highest] value that reaches the leaf
   clauses = []
   for test, branch in path:
     if test.kind == "le" and test.thr.denominator == 1:
       low, high = bounds.setdefault(test.a, [None, None])
-      bounds[test.a] = [low, min(high or inf, int(test.thr))] if branch == 0 else [max(low or -inf, int(test.thr) + 1), high]
+      n = int(test.thr)
+      bounds[test.a] = [low, n if high is None else min(high, n)] if branch == 0 else [n + 1 if low is None else max(low, n + 1), high]
     elif test.kind in ("is", "in", "switch"):
       here = [test.value] if test.kind == "is" else test.values if test.kind == "in" else [test.values[branch]]
       keep = test.kind == "switch" or branch == 0
       allowed[test.a] = [x for x in allowed.get(test.a, values[test.a]) if (x in here) == keep]
     else: clauses.append(test.text(branch))
   for name, (low, high) in bounds.items():
-    span = f"{low:,} to {high:,}" if None not in (low, high) else f"above {low - 1:,}" if low is not None else f"at most {high:,}"
+    date = name in dates
+    if low is not None and high is not None: span = show(name, low) if low == high else f"{show(name, low)} to {show(name, high)}"
+    elif low is not None: span = f"{'after' if date else 'above'} {show(name, low - 1)}"
+    elif strict(high): span = f"{'before' if date else 'below'} {show(name, high + 1)}"  # the rule says `< 5000`, not `<= 4999`
+    else: span = f"{'on or before' if date else 'at most'} {show(name, high)}"
     clauses.append(f"{name} is {span}")
   for name, kept in allowed.items():
     out = [x for x in values[name] if x not in kept]
-    clauses.append(f"{name} is not {' or '.join(out)}" if 0 < len(out) < len(kept) else f"{name} is {' or '.join(kept)}")
+    if not out: continue  # every value gets here: the field does not matter on this path
+    if not kept: clauses.append(f"{name} has no value that gets here")
+    elif len(kept) == 1: clauses.append(f"{name} is {kept[0]}")
+    elif len(out) == 1: clauses.append(f"{name} is not {out[0]}")
+    else: clauses.append(f"{name} is none of {', '.join(out)}" if len(out) < len(kept) else f"{name} is one of {', '.join(kept)}")
   return " and ".join(clauses) or "everywhere"
 
 def conds_text(conds: Conds) -> str: return " and ".join(test.text(branch) for test, branch in conds) or "everywhere"
@@ -291,13 +302,14 @@ def fit_report(rows: Sequence[Row], schema: Schema) -> tuple[dict[str, Any], str
   leaves = root.leaves()
   residual = [{"where": conds_text(path), "n": len(leaf.rows), "misses": leaf.misses, "outputs": dict(leaf.counts)}
               for leaf, path in sorted(leaves, key=lambda lp: -lp[0].misses) if leaf.misses]
-  rules = [{"when": plain_when(path, schema), "then": leaf.label, "share": round(len(leaf.rows) / n, 3)}  # what the loop does most, for the report
-           for leaf, path in sorted(leaves, key=lambda lp: -len(lp[0].rows))[:5]]
+  ranked = sorted((lp for lp in leaves if lp[0].rows), key=lambda lp: -len(lp[0].rows))  # what the loop does most, for the report
+  rules = [{"when": plain_when(path, schema), "then": leaf.label, "share": round(len(leaf.rows) / n, 3)} for leaf, path in ranked[:5]]
+  rest = [len(ranked[5:]), round(sum(len(leaf.rows) for leaf, _ in ranked[5:]) / n, 3)]
   used = sorted({name for _, path in leaves for test, _ in path for name in (test.a, test.b) if name})
   report: dict[str, Any] = {
     "slice": "early", "n": n, "leaves": len(leaves), "fields_used": used, "fields_unused": [f for f in decision_fields(schema) if f not in used],
     "early_agreement": round(1 - missed / n, 4), "early_misses": missed, "cv_agreement": round(cv_hits / n, 4) if n >= 2 * CV_FOLDS else None,
-    "residual": residual, "rules": rules}
+    "residual": residual, "rules": rules, "rules_rest": rest}
   return report, source
 
 def forecast(report: dict[str, Any]) -> tuple[float, str]:

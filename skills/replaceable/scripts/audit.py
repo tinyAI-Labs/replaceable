@@ -106,7 +106,8 @@ def fit_best(rows: list[stats.Row], schema: stats.Schema, types_src: str, offere
   if not expressions: return diagnosed({**plain, "derived": {**note, "used_by_the_rule": []}}, rows, schema), plain_src
   wide = widen(rows, schema, {name: columns[e] for name, e in zip(names, expressions)})
   report, source = fit_report(*wide)
-  note.update(expressions=dict(zip(names, expressions)), with_them={k: report[k] for k in SCORES})
+  meaning = {n: e.replace("x.", "") if e in offered else what[e] for n, e in zip(names, expressions)}  # in words, for the report
+  note.update(expressions=dict(zip(names, expressions)), meaning=meaning, with_them={k: report[k] for k in SCORES})
   used = [k for k, name in enumerate(names) if name in report["fields_used"]]
   if not used or forecast(report)[0] <= forecast(plain)[0]:
     stands = {**plain, "derived": {**note, "used_by_the_rule": [], "note": "no gain in cross-validated agreement: the rule without them stands"}}

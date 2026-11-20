@@ -9,8 +9,8 @@ import verdict as v
 BARS = "▁▂▃▄▅▆▇█"
 PLAIN = {  # (headline, what it means)
   "DETERMINISTIC": ("Predictable: a fixed rule can run this loop",
-                    "The same input always gets the same answer, so a simple rule can do this job without an LLM."),
-  "CONSTANT": ("Always the same answer", "Every run ends the same way, so no LLM is needed."),
+                    "A simple rule reproduced this loop's answers on runs it had never seen, so it can do this job without an LLM."),
+  "CONSTANT": ("Always the same answer", "Every logged run ended the same way, so no LLM is needed."),
   "DETERMINISTIC_LEARNED": ("Predictable, but too intricate for a short rule",
                             "The same input gets the same answer, but no short readable rule describes it."),
   "PROBABILISTIC": ("Not predictable: this loop needs the LLM", "The same input gets different answers, so a fixed rule cannot replace it."),
@@ -20,26 +20,40 @@ NEXT = {"DETERMINISTIC": "A person confirms that Rule.lean matches the written p
         "CONSTANT": "A person confirms that the loop really never varies before it is replaced by a constant.",
         "DETERMINISTIC_LEARNED": "The runs are reproducible but no short rule states them: a small trained model would replace the loop, not a rule.",
         "PROBABILISTIC": "The same inputs get different answers: no fixed rule or small model can replace this loop as it is.",
-        "INCONCLUSIVE": "The rationale says why; more runs help only if the rule's agreement was still rising.",
+        "INCONCLUSIVE": "More runs help only if the rule's agreement was still rising; the evidence below says whether it was.",
         "OUT_OF_SCOPE": "The output is free text: this check does not apply."}
+
+def plain(result: dict[str, Any]) -> tuple[str, str]:
+  # (headline, meaning); a decision the loop makes on text it first has to read is only partly replaceable
+  if result.get("scope") == "decision_step_only" and result["verdict"] in v.SCOPED:
+    return ("Predictable once the input is read: the decision can be a fixed rule",
+            "Reading the input (documents, messages) still needs the LLM; the decision made on it can be a simple rule.")
+  return PLAIN[result["verdict"]]
 
 def floor1(share: float) -> str:
   return f"{int(share * 1000) / 10:.1f}%"  # rounded down, like v.pct: a figure below the bar must not read as the bar
 
 def few(names: list[str], limit: int = 5) -> str:
-  return ", ".join(names[:limit]) + (f" and {len(names) - limit} more" if len(names) > limit else "")
+  shown = names[:limit]
+  if len(names) > limit: return ", ".join(shown) + f" and {len(names) - limit} more"
+  return ", ".join(shown[:-1]) + (" and " if len(shown) > 1 else "") + "".join(shown[-1:])
 
 def loop_text(result: dict[str, Any]) -> str | None:
   # the loop in one sentence: what it reads and what it can answer
   loop = result.get("loop")
   if not loop: return None
-  outcomes = f"one of {len(loop['answers'])} outcomes ({few(loop['answers'])})" if loop["answers"] else "free text"
-  return f"Reads {few(loop['reads'])} and decides {outcomes}." if loop["answers"] else f"Reads {few(loop['reads'])} and writes {outcomes}."
+  answers = loop["answers"]
+  if not answers: verb = "writes free text"
+  elif len(answers) == 1: verb = f"always answers {answers[0]}"
+  else: verb = f"decides one of {len(answers)} outcomes ({few(answers)})"
+  return (f"Reads {few(loop['reads'])} and " if loop["reads"] else "") + verb + "."
 
 def rule_lines(result: dict[str, Any]) -> list[str]:
   # what the loop does most, as "share of runs: when -> answer" (only for a loop a rule describes)
-  return [f"{round(r['share'] * 100)}% of runs: " + (f"{r['when']} → " if r["when"] != "everywhere" else "always ") + r["then"]
-          for r in result.get("rules", [])]
+  lines = [f"{round(r['share'] * 100)}% of runs: " + (f"{r['when']} → " if r["when"] != "everywhere" else "always ") + r["then"]
+           for r in result.get("rules", [])]
+  count, share = result.get("rules_rest", [0, 0])
+  return lines + ([f"{round(share * 100)}% of runs: {count} smaller cases"] if count else [])
 
 def cost_rows(result: dict[str, Any], usd: float | None = None) -> list[tuple[str, str, str]]:
   # (label, value, note): what the loop costs per run, at scale, and while it was learning
@@ -51,8 +65,9 @@ def cost_rows(result: dict[str, Any], usd: float | None = None) -> list[tuple[st
   price = f"about ${total * usd / 1e6:,.2f} at ${usd:g} per million" if usd else "at the log's pace" if month else f"{t['cases_with_tokens']:,} runs"
   rows.append(("Per month" if month else "In the log", f"{total:,} tokens", price))
   if cost := v.learning_cost(t):
-    first = f"{cost[0]:,.0f} tokens, the first {learned['from_run']:,} runs, {v.pct(learned['accuracy_before'])} right"
-    rows.append(("While it was learning", f"{cost[1]:.1f}x as much per run", first))
+    spent = cost[0] * learned["from_run"]
+    first = f"{spent:,.0f} tokens in all over the first {learned['from_run']:,} runs ({v.pct(learned['accuracy_before'])} right)"
+    rows.append(("While it was learning", f"{cost[1]:.1f}x as much per run", first + (f", about ${spent * usd / 1e6:,.2f}" if usd else "")))
   return rows
 
 def saving(result: dict[str, Any]) -> str | None:
@@ -60,8 +75,9 @@ def saving(result: dict[str, Any]) -> str | None:
   t = result["tokens"]
   if not t["known"] or not t["rule_share"]: return None
   month = t.get("per_month")
-  saved = f"about {round(t['rule_share'] * month):,} tokens a month" if month else f"{t['saved_logged']:,} tokens over the log"
-  return f"A fixed rule runs this for 0 tokens: {saved} saved."
+  saved = f"{round(t['rule_share'] * month):,} tokens a month" if month else f"{t['saved_logged']:,} tokens over the log"
+  if t.get("note"): return f"A fixed rule would run the decision for 0 tokens: at most {saved} saved, because reading the input still needs the LLM."
+  return f"A fixed rule runs this for 0 tokens: about {saved} saved."
 
 def evidence_rows(result: dict[str, Any]) -> list[tuple[str, str, str]]:
   # the numbers behind the verdict, for the technical reader
@@ -104,14 +120,14 @@ def marker(result: dict[str, Any]) -> tuple[int, str] | None:
 
 def terminal(result: dict[str, Any], usd: float | None = None) -> str:
   # the compact answer: the loop, the verdict, the cost, and for a loop that could be replaced the question
-  name, scope, loop = result["verdict"], result.get("scope"), loop_text(result)
-  lines = [f"replaceable · {name}" + (f" ({scope})" if scope else ""), *([f"Loop: {loop}"] if loop else []),
-           v.answer_line(result), v.tokens_line(result["tokens"], usd)]
+  name, loop = result["verdict"], loop_text(result)
+  title = f"replaceable · {name}" + (" (decision step only)" if result.get("scope") == "decision_step_only" else "")
+  lines = [title, *([f"Loop: {loop}"] if loop else []), v.answer_line(result), v.tokens_line(result["tokens"], usd)]
   return "\n".join(lines + ([v.ASK] if name in v.SCOPED else []) + ["Full report: report.html (browser) · report.md (terminal, Claude app)"])
 
 def markdown(result: dict[str, Any], usd: float | None = None) -> str:
   name, learned = result["verdict"], result.get("learning") or {}
-  head, meaning = PLAIN[name]
+  head, meaning = plain(result)
   out = [f"# {head}", "", f"> {meaning}", "", f"*{v.answer_line(result)[len('Answer: '):]}*", ""]
   if loop := loop_text(result):
     common = ["Its most common decisions:", ""] + [f"- {line}" for line in rule_lines(result)] + [""] if result.get("rules") else []
@@ -119,7 +135,8 @@ def markdown(result: dict[str, Any], usd: float | None = None) -> str:
   if rows := cost_rows(result, usd):
     out += ["## What it costs", "", "| | | |", "|---|---:|---|"] + [f"| {a} | **{b}** | {c} |" for a, b, c in rows] + [""]
   if (cheaper := saving(result)) or name in v.SCOPED:
-    out += ["## What a fixed rule would cost", "", *([cheaper] if cheaper else []), *([f"**{v.ASK}**"] if name in v.SCOPED else []), ""]
+    out += ["## What a fixed rule would cost" if cheaper else "## Cutting the spend", "", *([cheaper, ""] if cheaper else [])]
+    out += [f"**{v.ASK}**", ""] if name in v.SCOPED else [""]
   if (lines := curves(result)) and (n := learned.get("runs")):
     accuracy, tokens = lines
     mark, said = marker(result) or (None, "")
@@ -166,14 +183,14 @@ def chart(result: dict[str, Any]) -> str:
 
 def page(result: dict[str, Any], usd: float | None = None) -> str:
   name, esc = result["verdict"], html.escape
-  head, meaning = PLAIN[name]
+  head, meaning = plain(result)
   look = "good" if name in v.SCOPED else {"INCONCLUSIVE": "warn", "PROBABILISTIC": "bad"}.get(name, "none")
   card = lambda title, body: f'<div class="card"><h2>{title}</h2>{body}</div>' if body else ""  # noqa: E731
+  cheaper = saving(result)
   loop = loop_text(result)
   rules = "".join(f"<li>{esc(line)}</li>" for line in rule_lines(result))
   costs = "".join(f'<div class="kpi"><span>{esc(a)}</span><b>{esc(b)}</b><i>{esc(c)}</i></div>' for a, b, c in cost_rows(result, usd))
-  cheaper = saving(result)
-  ask = f'<p class="cta">{esc(v.ASK)}</p>' if name in v.SCOPED else ""
+  ask = f'<p class="cta"><a href="https://tinyailabs.com/">{esc(v.ASK)}</a></p>' if name in v.SCOPED else ""
   evidence = "".join(f"<tr><td>{esc(a)}</td><td><b>{esc(b)}</b></td><td>{esc(c)}</td></tr>" for a, b, c in evidence_rows(result))
   head_html = ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
                f'<meta name="viewport" content="width=device-width,initial-scale=1"><title>Replaceable report</title><style>{CSS}</style></head>')
@@ -181,7 +198,8 @@ def page(result: dict[str, Any], usd: float | None = None) -> str:
           f'<p class="small">{esc(v.answer_line(result)[len("Answer: "):])}</p>'
           + card("The loop", f"<p>{esc(loop)}</p>" + (f"<p>Its most common decisions:</p><ul>{rules}</ul>" if rules else "") if loop else "")
           + card("What it costs", f'<div class="grid">{costs}</div>' if costs else "")
-          + card("What a fixed rule would cost", f"<p>{esc(cheaper)}</p>{ask}" if cheaper else ask) + chart(result)
+          + card("What a fixed rule would cost" if cheaper else "Cutting the spend", f"<p>{esc(cheaper)}</p>{ask}" if cheaper else ask)
+          + chart(result)
           + f'<details class="card"><summary>The evidence</summary><table>{evidence}</table><p>{esc(result["rationale"])}</p>'
           f"<p>Next: {esc(next_step(result))}</p></details></main></body></html>")
 

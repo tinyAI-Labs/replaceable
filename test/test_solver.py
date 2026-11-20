@@ -1,5 +1,6 @@
 # the solver recovers a known rule from its log, and derive offers the quantities a policy plausibly computes
 import datetime, random, sys, unittest
+from fractions import Fraction
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "skills" / "replaceable" / "scripts"))
 import derive, fit
@@ -29,6 +30,48 @@ class TestFit(unittest.TestCase):
       ("amount is above 5,000", "deny"), ("amount is at most 5,000 and tier is gold", "approve"),
       ("amount is 1,001 to 5,000 and tier is basic", "review"), ("amount is at most 1,000 and tier is basic", "approve")])
     self.assertAlmostEqual(sum(r["share"] for r in rules), 1.0, places=2)
+  def test_the_wording_of_a_path_holds_for_the_same_inputs_as_the_path(self):
+    # property: for random paths over every test kind, the sentence is true of exactly the inputs the path sends to the leaf
+    names = ["red", "green", "blue", "grey"]
+    schema_ = schema({"name": "n", "type": "nat"}, {"name": "c", "type": "enum", "values": names},
+                     {"name": "d", "type": "nat", "unit": "calendar date, YYYYMMDD"})
+    rng = random.Random(5)
+    def holds(clause, x):
+      for name in ("n", "c", "d"):
+        if not clause.startswith(name + " "): continue
+        rest = clause[len(name) + 1:]
+        val = x[name]
+        if rest.startswith("is none of "): return val not in rest[11:].split(", ")
+        if rest.startswith("is one of "): return val in rest[10:].split(", ")
+        if rest.startswith("is not "): return val != rest[7:]
+        if rest.startswith("has no value"): return False
+        if rest.startswith("is "):
+          word = rest[3:]
+          if name == "c": return val == word
+          num = lambda s: int(s.replace(",", "").replace("-", ""))  # noqa: E731
+          if word.startswith(("above ", "after ")): return val > num(word.split(" ", 1)[1])
+          if word.startswith(("below ", "before ")): return val < num(word.split(" ", 1)[1])
+          if word.startswith(("at most ", "on or before ")): return val <= num(word.rsplit(" ", 1)[1])
+          if " to " in word:
+            lo, hi = word.split(" to ")
+            return num(lo) <= val <= num(hi)
+          return val == num(word)
+      raise AssertionError(clause)
+    for _ in range(300):
+      path = []
+      for _ in range(rng.randrange(0, 4)):
+        kind = rng.choice(["le", "le", "is", "in", "switch"])
+        if kind == "le": test = fit.Test("le", rng.choice("nd"), thr=Fraction(rng.randrange(0, 40)))
+        elif kind == "is": test = fit.Test("is", "c", value=rng.choice(names))
+        elif kind == "in": test = fit.Test("in", "c", values=tuple(rng.sample(names, 2)))
+        else: test = fit.Test("switch", "c", values=tuple(names))
+        path.append((test, rng.randrange(test.arity)))
+      text = fit.plain_when(path, schema_)
+      for _ in range(40):
+        x = {"n": rng.randrange(0, 45), "c": rng.choice(names), "d": 20240100 + rng.randrange(0, 45)}
+        truth = all(test.branch(x) == branch for test, branch in path)
+        clauses = [] if text == "everywhere" else text.split(" and ")
+        self.assertEqual(all(holds(c, x) for c in clauses), truth, (text, x))
   def test_dates_are_not_compared_as_ratios(self):  # 20271231 / 20280101 is not a day: a ratio of two YYYYMMDD numbers is not calendar arithmetic
     start = datetime.date(2026, 1, 1)
     def make(rng):

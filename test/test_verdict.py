@@ -117,7 +117,7 @@ class TestReport(unittest.TestCase):  # the owner reads the answer and the token
       self.assertEqual("tinyailabs.com" in shown, name in verdict.SCOPED, name)
   def test_the_verdict_describes_the_loop_and_its_rules_in_the_owners_words(self):
     rules = [{"when": "derived0 is above 5", "then": "approve", "share": 0.5}]
-    fit = {"rule_sha256": stats.sha256("rule"), "rules": rules, "derived": {"expressions": {"derived0": "x.a * x.b"}}}
+    fit = {"rule_sha256": stats.sha256("rule"), "rules": rules, "rules_rest": [0, 0], "derived": {"meaning": {"derived0": "a * b"}}}
     state = {"triage": {"scope": "full"}, "fit": fit}
     schema = {"input": [{"name": "a", "role": "decision", "type": "nat"}, {"name": "id", "role": "identifier", "type": "nat"}],
               "output": {"name": "output", "values": ["approve", "deny"]}}

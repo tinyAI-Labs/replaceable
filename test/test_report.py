@@ -28,11 +28,12 @@ class TestCosts(unittest.TestCase):
     said = self.said(RESULT, 3.0)
     self.assertEqual(said["Per run"], ("1,200 tokens", "once it works"))
     self.assertEqual(said["Per month"], ("3,000,000 tokens", "about $9.00 at $3 per million"))
-    self.assertEqual(said["While it was learning"], ("2.5x as much per run", "3,000 tokens, the first 200 runs, 70% right"))
+    self.assertEqual(said["While it was learning"],
+                     ("2.5x as much per run", "600,000 tokens in all over the first 200 runs (70% right), about $1.80"))
   def test_without_a_pace_the_log_total_and_the_price_are_shown(self):
     paceless = RESULT | {"tokens": {k: val for k, val in TOKENS.items() if k != "per_month"} | {"saved_logged": 1_000_000}}
     self.assertEqual(self.said(paceless, 2.0)["In the log"], ("1,000,000 tokens", "about $2.00 at $2 per million"))
-    self.assertEqual(report.saving(paceless), "A fixed rule runs this for 0 tokens: 1,000,000 tokens over the log saved.")
+    self.assertEqual(report.saving(paceless), "A fixed rule runs this for 0 tokens: about 1,000,000 tokens over the log saved.")
   def test_nothing_is_said_about_cost_without_a_token_count(self):
     bare = {"verdict": "INCONCLUSIVE", "rationale": "r", "tokens": {"known": False}}
     self.assertEqual((report.cost_rows(bare), report.saving(bare), report.evidence_rows(bare)), ([], None, []))
@@ -43,13 +44,28 @@ class TestCosts(unittest.TestCase):
 class TestTheLoop(unittest.TestCase):
   LOOP = {"reads": ["amount", "tier"], "answers": ["approve", "deny"]}
   def test_the_loop_in_one_sentence(self):
-    self.assertEqual(report.loop_text({"loop": self.LOOP}), "Reads amount, tier and decides one of 2 outcomes (approve, deny).")
+    self.assertEqual(report.loop_text({"loop": self.LOOP}), "Reads amount and tier and decides one of 2 outcomes (approve and deny).")
     many = {"reads": [f"f{i}" for i in range(8)], "answers": []}
     self.assertEqual(report.loop_text({"loop": many}), "Reads f0, f1, f2, f3, f4 and 3 more and writes free text.")
     self.assertIsNone(report.loop_text({}))
   def test_the_main_rules_in_words(self):
     rules = [{"when": "tier is not gold", "then": "deny", "share": 0.456}, {"when": "everywhere", "then": "approve", "share": 0.3}]
     self.assertEqual(report.rule_lines({"rules": rules}), ["46% of runs: tier is not gold → deny", "30% of runs: always approve"])
+
+class TestScope(unittest.TestCase):
+  def test_a_decision_step_is_not_sold_as_the_whole_loop(self):
+    part = RESULT | {"scope": "decision_step_only", "tokens": TOKENS | {"note": "upper bound"}}
+    text = report.markdown(part)
+    self.assertIn("Predictable once the input is read", text)
+    self.assertIn("at most 3,000,000 tokens a month saved", text)
+    self.assertNotIn("without an LLM", text)
+    self.assertIn("(decision step only)", report.terminal(part))
+  def test_the_remaining_cases_are_counted_not_hidden(self):
+    self.assertEqual(report.rule_lines(RESULT | {"rules_rest": [3, 0.12]})[-1], "12% of runs: 3 smaller cases")
+  def test_the_question_is_a_link_and_a_learned_loop_is_not_promised_a_rule_saving(self):
+    self.assertIn('<a href="https://tinyailabs.com/">', report.page(RESULT))
+    learned = report.markdown(RESULT | {"verdict": "DETERMINISTIC_LEARNED", "tokens": TOKENS | {"rule_share": 0.0}})
+    self.assertIn("## Cutting the spend", learned)
 
 class TestEvidence(unittest.TestCase):
   def said(self, result): return {label: (value, note) for label, value, note in report.evidence_rows(result)}
@@ -69,7 +85,7 @@ class TestEvidence(unittest.TestCase):
     self.assertEqual(self.said(trimmed)["Converged loop"], ("800 runs", "99% right, examined, latest only"))
   def test_the_next_step_follows_where_an_inconclusive_verdict_came_from(self):
     self.assertIn("steady for 300", report.next_step({"verdict": "INCONCLUSIVE", "exit_stage": "feedback"}))
-    self.assertIn("rationale", report.next_step({"verdict": "INCONCLUSIVE", "exit_stage": "replay"}))
+    self.assertIn("evidence", report.next_step({"verdict": "INCONCLUSIVE", "exit_stage": "replay"}))
   def test_a_block_below_the_axis_stays_inside_its_panel(self):
     low = RESULT | {"learning": RESULT["learning"] | {"curve": [[0.3, 3000.0], [1.0, 1200.0]]}}
     ys = [float(pair.split(",")[1]) for pair in report.page(low).split('points="')[1].split('"')[0].split()]
@@ -80,8 +96,8 @@ class TestRendering(unittest.TestCase):
     self.assertEqual(report.spark([0.5, 0.75, 1.0, None], 0.5, 1.0), "▁▅█·")
   def test_terminal_names_the_loop_the_answer_the_cost_and_the_question(self):
     lines = report.terminal(RESULT).splitlines()
-    self.assertEqual(lines[0], "replaceable · DETERMINISTIC (full)")
-    self.assertEqual(lines[1], "Loop: Reads amount, tier and decides one of 2 outcomes (approve, deny).")
+    self.assertEqual(lines[0], "replaceable · DETERMINISTIC")
+    self.assertEqual(lines[1], "Loop: Reads amount and tier and decides one of 2 outcomes (approve and deny).")
     self.assertTrue(lines[2].startswith("Answer: Yes, deterministic.") and lines[3].startswith("Tokens: 1,200 per run"))
     self.assertIn("tinyailabs.com", lines[4])
     self.assertIn("report.html", lines[5])

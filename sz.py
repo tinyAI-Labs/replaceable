@@ -3,7 +3,7 @@
 import sys, token, tokenize
 from pathlib import Path
 
-MAX_LINE_COUNT, TOKENS = 1625, {token.OP, token.NAME, token.NUMBER, token.STRING}
+MAX_LINE_COUNT, TOKENS = 1655, {token.OP, token.NAME, token.NUMBER, token.STRING}
 
 MAX_WITNESS_LINES = 110  # the optional learned-witness code in scripts/witness/ has a budget of its own: the core budget stays the size of the skill
 
