@@ -104,17 +104,22 @@ class TestReport(unittest.TestCase):  # the owner reads the answer and the token
       out = io.StringIO()
       with contextlib.redirect_stdout(out): verdict.conclude(**kwargs)
       return out.getvalue().splitlines()
-  def test_every_verdict_prints_the_answer_and_the_sign_up_line_and_nothing_else(self):
+  def test_every_verdict_prints_the_answer_and_the_tokens_line_and_nothing_else(self):
     ruled = {"triage": {"scope": "full"}, "fit": {"rule_sha256": stats.sha256("rule")}}
     receipt = lambda **more: {"rule_sha256": stats.sha256("rule"), **report(**more)}  # noqa: E731
     exits = lambda name, stage: {"proposed": {"verdict": name, "exit_stage": stage, "why": "w"}, "conflicts": {"example_pairs": [["a", "b"]]}}  # noqa: E731
     for name, state, held in (("DETERMINISTIC", ruled, receipt()), ("DETERMINISTIC_LEARNED", ruled, receipt(k=100, **model())),
                               ("INCONCLUSIVE", ruled, receipt(k=100)), ("PROBABILISTIC", exits("PROBABILISTIC", "conflicts"), None),
                               ("OUT_OF_SCOPE", exits("OUT_OF_SCOPE", "triage"), None)):
-      self.assertEqual(self.conclusion(state, held), [f"Answer: {verdict.ANSWERS[name]}", verdict.tokens_line({"known": False})], name)
+      tokens = verdict.tokens_line({"known": False}, ask=name in verdict.SCOPED)
+      self.assertEqual(self.conclusion(state, held), [f"Answer: {verdict.ANSWERS[name]}", tokens], name)
       why = self.conclusion(state, held, why=True)  # asked why: the verdict, reasons and tokens come first; the answer and tokens lines still end it
-      self.assertEqual(why[-2:], [f"Answer: {verdict.ANSWERS[name]}", verdict.tokens_line({"known": False})], name)
+      self.assertEqual(why[-2:], [f"Answer: {verdict.ANSWERS[name]}", tokens], name)
       self.assertTrue(any(line.startswith(f"VERDICT: {name}") for line in why) and any(line.startswith("WHY:") for line in why), name)
+  def test_only_a_loop_that_could_be_replaced_is_asked_about_its_spend(self):
+    for name in verdict.ANSWERS:
+      self.assertEqual("tinyailabs.com" in verdict.tokens_line({"known": False}, ask=name in verdict.SCOPED), name in verdict.SCOPED, name)
+    self.assertNotIn("tinyailabs.com", verdict.tokens_line({"known": True, "per_run": 9, "logged": 90, "cases_with_tokens": 10}, ask=False))
   def test_without_a_token_count_the_line_says_so_and_asks(self):
     self.assertEqual(verdict.tokens_line({"known": False}),
                      "Tokens: not in this log. Do you want to reduce your token spend for this agentic loop to zero? Find out how: https://tinyailabs.com/")

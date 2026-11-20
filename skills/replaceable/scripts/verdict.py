@@ -14,17 +14,19 @@ SCOPED = ("DETERMINISTIC", "DETERMINISTIC_CORE_FALLBACK", "DETERMINISTIC_LEARNED
 ASK = "Do you want to reduce your token spend for this agentic loop to zero? Find out how: https://tinyailabs.com/"
 # NOTE: the owner's whole report is two lines: one answer per verdict and what the loop spends. How the verdict came about is printed only on --why.
 ANSWERS = {
-  "DETERMINISTIC": "Yes, deterministic.", "DETERMINISTIC_CORE_FALLBACK": "Mostly deterministic.", "DETERMINISTIC_LEARNED": "Yes, deterministic.",
-  "CONSTANT": "Yes, constant.", "PROBABILISTIC": "No, not deterministic.", "INCONCLUSIVE": "Cannot tell from this log.",
-  "OUT_OF_SCOPE": "Not applicable: the output is free text, not a typed decision."}
+  "DETERMINISTIC": "Yes, deterministic.", "DETERMINISTIC_CORE_FALLBACK": "Mostly deterministic.", "CONSTANT": "Yes, constant.",
+  "DETERMINISTIC_LEARNED": "Yes, deterministic (no readable rule).", "PROBABILISTIC": "No, not deterministic.",
+  "INCONCLUSIVE": "Cannot tell from this log.", "OUT_OF_SCOPE": "Not applicable: the output is free text, not a typed decision."}
 
-def tokens_line(tokens: dict[str, Any], usd: float | None = None) -> str:
-  # the second line: what the loop spends, from the log's own counts (a price only if given, a pace only if the log has dates), then the question
-  if not tokens["known"]: return f"Tokens: not in this log. {ASK}"
+def tokens_line(tokens: dict[str, Any], usd: float | None = None, ask: bool = True) -> str:
+  # the second line: what the loop spends, from the log's own counts (a price only if given, a pace only if the log has dates), then the question,
+  # asked only of a loop that could be replaced
+  tail = f" {ASK}" if ask else ""
+  if not tokens["known"]: return f"Tokens: not in this log.{tail}"
   said = f"this loop used {tokens['per_run']:,.0f} per run, {tokens['logged']:,} over its {tokens['cases_with_tokens']:,} logged runs"
   if "per_month" in tokens: said += f", at that pace about {tokens['per_month']:,} a month"
   total, span = (tokens["per_month"], "a month") if "per_month" in tokens else (tokens["logged"], "over the logged runs")
-  return f"Tokens: {said}" + (f" (about ${total * usd / 1e6:,.2f} {span} at ${usd:g} per million tokens)" if usd else "") + f". {ASK}"
+  return f"Tokens: {said}" + (f" (about ${total * usd / 1e6:,.2f} {span} at ${usd:g} per million tokens)" if usd else "") + f".{tail}"
 
 def verdict_from_replay(replay: dict[str, Any]) -> tuple[str, str]:
   # NOTE: (verdict, reason) for a replay report or receipt. L is the exact one-sided 95% lower bound on the held-out agreement. The rows
@@ -152,7 +154,7 @@ def conclude(scope: str | None = None, note: str | None = None, why: bool = Fals
     print("NEXT: nothing to run; verdict.json is written. Report it as it is." + (
       " A person confirms that Rule.lean matches the written policy before it replaces the loop."
       if "scope" in result and result["verdict"] != "DETERMINISTIC_LEARNED" else ""))
-  print(f"Answer: {ANSWERS[result['verdict']]}\n{tokens_line(result['tokens'], usd)}")
+  print(f"Answer: {ANSWERS[result['verdict']]}\n{tokens_line(result['tokens'], usd, result['verdict'] in SCOPED)}")
   return 0
 
 if __name__ == "__main__":
