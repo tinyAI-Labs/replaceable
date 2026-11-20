@@ -45,7 +45,6 @@ class TestPrepareTyping(unittest.TestCase):
     free_text = [{"typed_input": {"n": i}, "output": f"text {i}"} for i in range(21)]
     self.assertEqual(prepare.infer(free_text, set())[0]["output"]["values"], [])
 
-if __name__ == "__main__": unittest.main()
 
 class TestPrepareLearning(unittest.TestCase):  # `correct` on every run sets the learning phase aside
   def test_the_runs_before_convergence_are_not_the_log(self):
@@ -56,12 +55,38 @@ class TestPrepareLearning(unittest.TestCase):  # `correct` on every run sets the
       subprocess.run([sys.executable, str(Path(prepare.__file__)), "raw.jsonl"], cwd=tmp, capture_output=True, text=True, check=True)
       meta, schema = (json.loads((Path(tmp) / name).read_text()) for name in ("metadata.json", "schema.json"))
       kept = [json.loads(line) for name in ("early", "heldout") for line in (Path(tmp) / "logs" / f"{name}.jsonl").read_text().splitlines()]
-    self.assertEqual((meta["n_total"], meta["n_early"], meta["n_heldout"]), (300, 150, 150))
-    self.assertEqual((meta["learning"]["converged"], meta["learning"]["from_run"], meta["learning"]["runs"]), (True, 400, 700))
-    self.assertEqual(meta["learning"]["tokens"]["mean"], round((300 * 800 + 100 * 100) / 400, 1))  # the runs set aside keep their cost
+    self.assertEqual((meta["n_total"], meta["n_early"], meta["n_heldout"]), (400, 200, 200))
+    self.assertEqual((meta["learning"]["converged"], meta["learning"]["from_run"], meta["learning"]["runs"]), (True, 300, 700))
+    self.assertEqual((meta["learning"]["accuracy_before"], meta["learning"]["tokens"]["mean"]), (0.6, 800))  # the runs set aside keep their numbers
     self.assertEqual(meta["tokens"]["mean"], 100)
-    self.assertEqual({r["case_id"] for r in kept}, {f"r{i:03d}" for i in range(400, 700)})
+    self.assertEqual({r["case_id"] for r in kept}, {f"r{i:03d}" for i in range(300, 700)})
     self.assertEqual([f["name"] for f in schema["input"]], ["n"])  # feedback is never an input of the rule
+
+  def prepare(self, rows, *args):
+    with tempfile.TemporaryDirectory() as tmp:
+      (Path(tmp) / "raw.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+      done = subprocess.run([sys.executable, str(Path(prepare.__file__)), "raw.jsonl", *args], cwd=tmp, capture_output=True, text=True, check=False)
+      meta = json.loads((Path(tmp) / "metadata.json").read_text()) if done.returncode == 0 else None
+    return done.returncode, done.stdout + done.stderr, meta
+  def run_of(self, n, correct):
+    return [{"case_id": f"r{i:04d}", "ts": i, "typed_input": {"n": i % 7}, "output": "a" if i % 7 < 3 else "b", "correct": correct(i)}
+            for i in range(n)]
+  def test_feedback_must_be_true_or_false_on_every_run(self):
+    rows = self.run_of(400, lambda i: True)
+    code, said, _ = self.prepare([*rows[:5], {**rows[5], "correct": "true"}, *rows[6:]])
+    self.assertEqual(code, 1)
+    self.assertIn("line 6: `correct` must be true or false", said)
+    code, said, _ = self.prepare([*rows[:5], {k: v for k, v in rows[5].items() if k != "correct"}, *rows[6:]])
+    self.assertEqual(code, 1)
+    self.assertIn("on some lines but not on all", said)
+  def test_a_loop_that_never_holds_95_percent_is_examined_on_its_latest_half(self):
+    code, said, meta = self.prepare(self.run_of(1000, lambda i: i % 5 != 0))
+    self.assertEqual(code, 0)
+    self.assertEqual((meta["learning"]["converged"], meta["learning"]["examined_from"], meta["learning"]["accuracy"]), (False, 500, 0.8))
+    self.assertEqual(meta["n_total"], 500)
+  def test_the_learning_phase_is_found_before_max_rows_trims_the_log(self):
+    code, _, meta = self.prepare(self.run_of(1000, lambda i: i >= 300 or i % 5 >= 2), "--max-rows", "400")
+    self.assertEqual((code, meta["learning"]["from_run"], meta["learning"]["runs"], meta["n_total"]), (0, 300, 1000, 400))
 
 class TestPrepareInput(unittest.TestCase):  # a log that is not JSON lines must be told so, not crash
   def run_on(self, text):
@@ -75,3 +100,5 @@ class TestPrepareInput(unittest.TestCase):  # a log that is not JSON lines must 
       self.assertEqual(code, 1)
       self.assertNotIn("Traceback", said)
       self.assertIn("converted first", said)
+
+if __name__ == "__main__": unittest.main()

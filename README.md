@@ -51,11 +51,11 @@ override, a check) until it is right at least 95% of the time, or does not get t
 | `expense_approval` | approves or escalates by a limit for each department, learned from reviewer overrides; a person decides the big amounts case by case | DETERMINISTIC_CORE_FALLBACK |
 | `pr_labeler` | labels pull requests small, medium or large with its own limits for each area and author type: too many branches to read, a learned model reproduces it | DETERMINISTIC_LEARNED |
 | `refund_agent` | improves but plateaus near 80%: the same inputs still get different answers | PROBABILISTIC (it never settles at 95%) |
-| `lead_router_memory` | reaches 95% by keeping notes on each rep's load, which the log does not carry: enterprise leads go to either rep | INCONCLUSIVE (hidden state) |
+| `lead_router_memory` | reaches 95%, but enterprise leads go to the two reps in a rotation the loop keeps in its notes and the log does not carry | INCONCLUSIVE (hidden state) |
 
-Each answer says from which run the loop held 95%, and the `Tokens:` line says what the runs before that cost compared with the converged loop.
-Two things to try. Delete the `correct` field from every line of `ticket_triage`: the exam then runs on the whole log, the learning phase is mixed in,
-and the loop no longer looks deterministic. Delete `arr` from `lead_router_memory`: it stays INCONCLUSIVE, because the input that decides was never the one logged.
+The answer says after which run the loop held 95% (or that its feedback never does), and the `Tokens:` line says what the runs before that cost compared with the converged loop.
+Something to try: delete the `correct` field from every line of `ticket_triage`: the exam then runs on the whole log, the learning phase is mixed in,
+and the same inputs now got different answers at different times: it comes out PROBABILISTIC.
 
 ## Your own log
 One JSON object per line (JSONL); a JSON array or a CSV has to be converted first. Each line is one run of the loop: the typed fields the decision
@@ -78,7 +78,7 @@ was made from, and the decision. From a trace or message-list export, roughly:
 - `correct` is the loop's own feedback on a run: a human override, a test, an eval score turned into pass or fail, as tracing tools record it. With it on
   every line, the skill sets aside the runs before the loop held 95% (its learning phase), examines the rest, and reports what the learning phase cost
   per run against the converged loop. A loop that never holds 95% is examined as a whole log. Without `correct`, the whole log is examined and a loop that
-  is still learning looks like one that drifted (`INCONCLUSIVE`).
+  is still learning looks like one that drifted or guesses (`PROBABILISTIC`, or `INCONCLUSIVE`).
 
 ## Tokens and savings
 Log a token count per run as `tokens` (the run's total), or as the SDKs report it: `usage.input_tokens` + `usage.output_tokens` (cache tokens are

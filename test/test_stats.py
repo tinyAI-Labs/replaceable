@@ -57,17 +57,25 @@ class TestTokens(unittest.TestCase):
                      {"cases": 11, "with_tokens": 10, "total": 55, "mean": 5.5, "median": 5.5, "p90": 9})
     self.assertEqual(stats.token_stats([{}, {}]), {"cases": 2, "with_tokens": 0})
 
-class TestConvergedFrom(unittest.TestCase):  # where a self-optimizing loop settles: the run from which the log is the policy to be replaced
+class TestConvergedFrom(unittest.TestCase):  # where a self-optimizing loop settles: how many runs were its learning phase
   ramp = [i % 5 >= 2 for i in range(300)]  # 60% right while it learns
-  def test_a_loop_that_learns_and_holds_is_converged_from_the_first_clean_block_after_the_last_dip(self):
-    self.assertEqual(stats.converged_from(self.ramp + [True] * 700), 400)  # block 300-400 is clean; the block at the edge is left out too
-    self.assertEqual(stats.converged_from([True] * 300 + [False] * 100 + [True] * 500), 500)  # a later dip moves the start behind it
+  def test_a_loop_that_learns_and_holds_has_its_learning_phase_cut_off(self):
+    self.assertEqual(stats.converged_from(self.ramp + [True] * 700), 300)
+    self.assertEqual(stats.converged_from([True] * 300 + [False] * 100 + [True] * 500), 400)  # a later dip moves the start behind it
+  def test_the_runs_before_the_first_full_block_are_checked_too(self):
+    self.assertEqual(stats.converged_from([False] * 99 + [True] * 1000), 99)  # 1099 runs: the odd 99 at the front are not waved through
   def test_a_loop_that_was_always_good_has_no_learning_phase(self):
     self.assertEqual(stats.converged_from([True] * 500), 0)
+  def test_the_tail_as_a_whole_is_at_least_95_percent(self):
+    log = self.ramp + [i % 25 < 23 for i in range(2000)] + [True] * 1000  # 92% for a long stretch, then clean: blocks at 92% pass the floor
+    start = stats.converged_from(log)
+    self.assertGreater(start, 300)
+    self.assertGreaterEqual(sum(log[start:]) / len(log[start:]), 0.95)
   def test_no_tail_no_convergence(self):
     self.assertIsNone(stats.converged_from([i % 5 != 0 for i in range(3000)]))  # 80% and flat: it never reaches 95%
     self.assertIsNone(stats.converged_from([True] * 100))  # too short to tell
-    self.assertIsNone(stats.converged_from([False] * 500 + [True] * 200))  # settled too recently: fewer than 150 runs are left
+    self.assertIsNone(stats.converged_from([False] * 500 + [True] * 120))  # settled too recently: fewer than 150 clean runs
+    self.assertIsNone(stats.converged_from([True] * 3000 + [False] * 60))  # it regressed at the end: the last block does not hold
 
 class TestRunsPerDay(unittest.TestCase):  # the pace a token count is extrapolated at: only real timestamps say how long the log took
   def rows(self, *ts): return [{"case_id": f"c{i}", "ts": t} for i, t in enumerate(ts)]

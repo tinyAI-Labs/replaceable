@@ -107,16 +107,16 @@ def token_stats(rows: Sequence[Row]) -> dict[str, Any]:
 PLATEAU, WINDOW, MIN_TAIL = 0.95, 100, 150  # a loop has converged when it holds at least 95% over a stretch of at least 150 runs
 
 def converged_from(correct: Sequence[bool]) -> int | None:
-  # the run from which the loop holds its plateau: the plateau is the accuracy of the last quarter of the log (it must reach PLATEAU), and the
-  # tail reaches back over every earlier block of WINDOW runs within four standard errors of a 95% loop (8.7 points) of it, less one block
-  # of margin; None when no tail of MIN_TAIL runs is left
+  # the number of runs before the loop settled (the learning phase), or None if it never holds 95% over MIN_TAIL runs. The plateau is the accuracy of
+  # the last quarter of the log and must reach PLATEAU; the tail reaches back over every earlier block of WINDOW runs within four standard errors of a
+  # 95% loop (8.7 points) of it, and then gives up its oldest blocks until the tail as a whole is at least PLATEAU
   n = len(correct)
   last = max(MIN_TAIL, n // 4)
   plateau = sum(correct[-last:]) / last if n >= MIN_TAIL else 0.0
   if plateau < PLATEAU: return None
   floor, start = plateau - 4 * sqrt(PLATEAU * (1 - PLATEAU) / WINDOW), n
-  while start >= WINDOW and sum(correct[start - WINDOW:start]) >= floor * WINDOW: start -= WINDOW
-  start = start + WINDOW if start >= WINDOW else 0  # the block at the edge may still hold the last corrections
+  while start and sum(correct[max(0, start - WINDOW):start]) >= floor * (start - max(0, start - WINDOW)): start = max(0, start - WINDOW)
+  while n - start >= MIN_TAIL and sum(correct[start:]) < PLATEAU * (n - start): start += WINDOW
   return start if n - start >= MIN_TAIL else None
 
 def runs_per_day(rows: Sequence[Row]) -> float | None:

@@ -2,9 +2,9 @@
 # usage: python3 scripts/prepare.py raw_log.jsonl [--schema schema.json] [--extraction-step] [--drop FIELD]... [--max-rows N]
 # NOTE: input is JSONL, one logged case per line, with the typed input under `typed_input` (or `input`) and the loop's answer under
 # `output`; `ts` (any sortable timestamp), `case_id` and `correct` (true/false: was this run right, from a human override or a check) are
-# optional. With `correct` on every line, the runs before the loop reached 95% are set aside as its learning phase and the rest is the log.
-# It writes logs/early.jsonl (the earliest half, which the rule is
-# fitted on), logs/heldout.jsonl (the latest half: only the replay reads it, and a host should move it out of the agent's reach),
+# optional. With `correct` on every line, the runs before the loop held 95% are set aside as its learning phase and the rest is the log (a loop that
+# never holds 95%: its latest half). It writes logs/early.jsonl (the earliest half, which the rule is fitted on), logs/heldout.jsonl (the latest
+# half: only the replay reads it, and a host should move it out of the agent's reach),
 # schema.json (inferred unless --schema is given), Types.lean and metadata.json. How a field is typed (every change is listed in `notes`):
 # - whole numbers become `nat`; decimals with up to MAX_DECIMALS places are scaled to whole numbers (12.50 -> 1250, `scale` in the schema);
 #   a field with negative values is split into its magnitude and a `<name>_negative` flag
@@ -150,29 +150,34 @@ def main():
     typed = raw.get("typed_input", raw.get("input")) if isinstance(raw, dict) else None
     if not isinstance(typed, dict) or "output" not in raw:
       fail(f"line {n + 1} needs `typed_input` (an object of fields) and `output`; JSON lines only: a CSV or JSON array has to be converted first")
+    if not isinstance(raw.get("correct", True), bool): fail(f"line {n + 1}: `correct` must be true or false, not {json.dumps(raw['correct'])}")
     for key in set(raw) - {"case_id", "ts", "correct", "typed_input", "input", "output"} - stats.TOKEN_KEYS: other.setdefault(key, raw[key])
     tokens = stats.row_tokens(raw)  # NOTE: kept next to the typed input, never inside it: a token count must not become a rule input
     rows.append({"case_id": str(raw.get("case_id", f"c{n:05d}")), "ts": raw.get("ts", n), "typed_input": typed, "output": raw["output"],
-                 **({} if tokens is None else {"tokens": tokens}), **({"correct": raw["correct"]} if isinstance(raw.get("correct"), bool) else {})})
+                 **({} if tokens is None else {"tokens": tokens}), **({"correct": raw["correct"]} if "correct" in raw else {})})
   if not rows: fail("the log is empty")
+  if 0 < sum("correct" in r for r in rows) < len(rows): fail("`correct` is on some lines but not on all: give every run its feedback, or none")
   rows.sort(key=lambda r: (str(r["ts"]) if not isinstance(r["ts"], (int, float)) else f"{r['ts']:020.6f}", r["case_id"]))
   notes: list[str] = []
+  learning = None
+  if all("correct" in r for r in rows):  # NOTE: the loop's own feedback, read on the whole log: the runs before it held 95% are not the policy
+    found = stats.converged_from([r["correct"] for r in rows])
+    start = len(rows) // 2 if found is None else found  # it never holds 95%: the latest half is examined, the least marked by what it learned early
+    seen = rows[start:]
+    learning = {"converged": found is not None, "runs": len(rows), "accuracy": round(sum(r["correct"] for r in seen) / len(seen), 3)}
+    if start and learning["converged"]:
+      before = rows[:start]
+      learning |= {"from_run": start, "accuracy_before": round(sum(r["correct"] for r in before) / start, 3), "tokens": stats.token_stats(before)}
+      notes.append(f"the loop held 95% accuracy after run {start} of {len(rows)}: those {start} runs are its learning phase, the rest is examined")
+    elif not learning["converged"]:
+      learning["examined_from"] = start
+      notes.append(f"the loop's feedback never holds 95% ({learning['accuracy']:.0%} over the latest half): the latest half of the log is examined")
+    rows = seen
   if args.max_rows and len(rows) > args.max_rows:
     notes.append(f"kept the latest {args.max_rows} of {len(rows)} cases (--max-rows)")
     rows = rows[-args.max_rows:]
   elif len(rows) > LARGE_LOG:
     notes.append(f"{len(rows)} cases: the fit and the Lean runs may take minutes or time out; --max-rows {LARGE_LOG} keeps the latest {LARGE_LOG}")
-
-  learning = None
-  if all("correct" in r for r in rows):  # NOTE: the loop's own feedback: the runs before it reached 95% are not the policy to be replaced
-    start, accuracy = stats.converged_from([r["correct"] for r in rows]), sum(r["correct"] for r in rows) / len(rows)
-    learning = {"converged": start is not None, "runs": len(rows), "accuracy": round(accuracy, 3)}
-    if start:
-      before = rows[:start]
-      learning |= {"from_run": start, "accuracy_before": round(sum(r["correct"] for r in before) / start, 3), "tokens": stats.token_stats(before)}
-      notes.append(f"the loop reached 95% accuracy from run {start} of {len(rows)}: the {start} runs before it are its learning phase")
-      rows = rows[start:]
-    elif start is None: notes.append(f"the loop never settles at 95% accuracy ({accuracy:.0%} over the log): the whole log is examined as it is")
 
   if args.schema: schema, problems = stats.read_schema(args.schema), []
   else:

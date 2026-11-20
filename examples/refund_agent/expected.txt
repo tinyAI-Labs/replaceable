@@ -1,2 +1,3 @@
 VERDICT: PROBABILISTIC
-Answer: No, not deterministic. The loop never settles at 95% accuracy (76%): this is about a loop that is still learning.
+Answer: No, not deterministic. Its feedback never holds 95% (81% over the latest half of the log): that half was checked.
+Tokens: this loop used 3,116 per run, 4,674,591 over its 1,500 runs in its latest half, at that pace about 33,702,056 a month.

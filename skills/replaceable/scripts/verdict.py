@@ -23,9 +23,9 @@ def answer_line(result: dict[str, Any]) -> str:
   # the answer, and when the log came with the loop's own feedback, which part of the log it is about
   learned, text = result.get("learning"), ANSWERS[result["verdict"]]
   if learned and learned.get("from_run"):
-    text += f" Checked on the runs after the loop reached 95% accuracy (from run {learned['from_run']:,} of {learned['runs']:,})."
+    text += f" Checked on the runs after the loop held 95% accuracy (after run {learned['from_run']:,} of {learned['runs']:,})."
   elif learned and not learned["converged"]:
-    text += f" The loop never settles at 95% accuracy ({learned['accuracy']:.0%}): this is about a loop that is still learning."
+    text += f" Its feedback never holds 95% ({learned['accuracy']:.0%} over the latest half of the log): that half was checked."
   return f"Answer: {text}"
 
 def tokens_line(tokens: dict[str, Any], usd: float | None = None, ask: bool = True) -> str:
@@ -33,10 +33,12 @@ def tokens_line(tokens: dict[str, Any], usd: float | None = None, ask: bool = Tr
   # asked only of a loop that could be replaced
   tail = f" {ASK}" if ask else ""
   if not tokens["known"]: return f"Tokens: not in this log.{tail}"
-  said = f"this loop used {tokens['per_run']:,.0f} per run, {tokens['logged']:,} over its {tokens['cases_with_tokens']:,} logged runs"
-  if "per_month" in tokens: said += f", at that pace about {tokens['per_month']:,} a month"
   learned = tokens.get("learning") or {}
-  if (spent := learned.get("tokens") or {}).get("with_tokens", 0) >= MIN_PHASE and tokens["per_run"]:  # what the buyer's budget leaves out
+  runs = "runs after it converged" if "from_run" in learned else "runs in its latest half" if "examined_from" in learned else "logged runs"
+  said = f"this loop used {tokens['per_run']:,.0f} per run, {tokens['logged']:,} over its {tokens['cases_with_tokens']:,} {runs}"
+  if "per_month" in tokens: said += f", at that pace about {tokens['per_month']:,} a month"
+  spent = learned.get("tokens") or {}  # what a budget made from the converged cost leaves out, once both phases are long enough to compare
+  if spent.get("with_tokens", 0) >= MIN_PHASE and tokens["cases_with_tokens"] >= MIN_PHASE and tokens["per_run"]:
     said += (f"; the {learned['from_run']:,} runs before it converged ({learned['accuracy_before']:.0%} accurate) used {spent['mean']:,.0f} per run, "
              f"{spent['mean'] / tokens['per_run']:.1f}x as much")
   total, span = (tokens["per_month"], "a month") if "per_month" in tokens else (tokens["logged"], "over the logged runs")
@@ -122,7 +124,7 @@ def token_block(state: dict[str, Any], receipt: dict[str, Any] | None, verdict: 
   # takes over. No count in the log means unknown: nothing is estimated from text length.
   halves = {name: t for name, t in (("early", state.get("tokens")), ("heldout", (receipt or {}).get("tokens"))) if t and t["with_tokens"]}
   whole = state.get("log_tokens")
-  if receipt is None and whole and whole["with_tokens"]: halves = {"whole log": whole}  # an early exit: no replay, but the count is known
+  if receipt is None and whole and whole["with_tokens"]: halves = {"log": whole}  # an early exit: no replay, but the count is known
   if not halves: return {"known": False, "note": "no token count in the log lines; add `tokens` (or `usage`) per case to get token use and savings"}
   n, total, name = sum(t["with_tokens"] for t in halves.values()), sum(t["total"] for t in halves.values()), verdict["verdict"]
   if name in ("DETERMINISTIC", "CONSTANT"): share, why = 1.0, f"{name}: the rule takes over every run"
@@ -134,9 +136,10 @@ def token_block(state: dict[str, Any], receipt: dict[str, Any] | None, verdict: 
   block = {"known": True, "per_run": mean, "logged": total, "cases_with_tokens": n, "halves": halves, "rule_share": share,
            "saved_per_run": round(share * mean, 1), "saved_logged": round(share * total)}
   if learned := state.get("learning"):  # the loop, seen from the runs before it converged
-    block["learning"] = {k: learned[k] for k in ("runs", "from_run", "accuracy_before") if k in learned} | {"tokens": learned.get("tokens")}
+    kept = ("runs", "from_run", "accuracy_before", "examined_from")
+    block["learning"] = {k: learned[k] for k in kept if k in learned} | {"tokens": learned.get("tokens")}
   if state.get("runs_per_day"): block["per_month"] = round(mean * state["runs_per_day"] * 30)  # at the pace of the early half of the log
-  where = "the whole log" if "whole log" in halves else " + ".join(halves) + " half"
+  where = "the log examined" if "log" in halves else " + ".join(halves) + " half"
   block["arithmetic"] = (f"{total} tokens / {n} runs with a count ({where}) = {mean} per run; rule share {share} ({why}); saved "
                          f"per run = {share} x {mean} = {block['saved_per_run']}; saved over the log = {share} x {total} = {block['saved_logged']}")
   if share and verdict.get("scope") == "decision_step_only":

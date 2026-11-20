@@ -125,12 +125,12 @@ class TestReport(unittest.TestCase):  # the owner reads the answer and the token
     self.assertEqual(verdict.answer_line(plain), "Answer: Yes, deterministic.")
     settled = {**plain, "learning": {"converged": True, "runs": 6000, "from_run": 1300}}
     self.assertEqual(verdict.answer_line(settled),
-                     "Answer: Yes, deterministic. Checked on the runs after the loop reached 95% accuracy (from run 1,300 of 6,000).")
+                     "Answer: Yes, deterministic. Checked on the runs after the loop held 95% accuracy (after run 1,300 of 6,000).")
     always = {**plain, "learning": {"converged": True, "runs": 600}}  # right from the start: nothing was set aside
     self.assertEqual(verdict.answer_line(always), "Answer: Yes, deterministic.")
-    never = {"verdict": "PROBABILISTIC", "learning": {"converged": False, "runs": 900, "accuracy": 0.76}}
+    never = {"verdict": "PROBABILISTIC", "learning": {"converged": False, "runs": 900, "accuracy": 0.76, "examined_from": 450}}
     self.assertEqual(verdict.answer_line(never),
-                     "Answer: No, not deterministic. The loop never settles at 95% accuracy (76%): this is about a loop that is still learning.")
+                     "Answer: No, not deterministic. Its feedback never holds 95% (76% over the latest half of the log): that half was checked.")
   def test_the_learning_phase_is_priced_against_the_converged_loop(self):
     spend = {"known": True, "per_run": 1000.0, "logged": 300_000, "cases_with_tokens": 300,
              "learning": {"from_run": 1300, "accuracy_before": 0.85, "tokens": {"with_tokens": 1300, "mean": 2500.0}}}
@@ -138,11 +138,13 @@ class TestReport(unittest.TestCase):  # the owner reads the answer and the token
     thin = {**spend, "learning": {**spend["learning"], "tokens": {"with_tokens": 10, "mean": 9000.0}}}
     self.assertNotIn("before it converged", verdict.tokens_line(thin))  # too few runs to compare
     self.assertNotIn("before it converged", verdict.tokens_line({**spend, "learning": None}))
+    self.assertIn("over its 300 runs after it converged", verdict.tokens_line(spend))
+    self.assertNotIn("before it converged", verdict.tokens_line({**spend, "cases_with_tokens": 10}))  # the converged side is too short to compare too
   def test_an_early_exit_quotes_the_whole_log_not_the_half_it_audited(self):
     half, whole = {"with_tokens": 5, "total": 50, "mean": 10.0}, {"with_tokens": 10, "total": 100, "mean": 10.0}
     block = verdict.token_block({"tokens": half, "log_tokens": whole}, None, {"verdict": "PROBABILISTIC"})
     self.assertEqual((block["cases_with_tokens"], block["logged"]), (10, 100))
-    self.assertIn("(the whole log)", block["arithmetic"])
+    self.assertIn("(the log examined)", block["arithmetic"])
   def test_without_a_token_count_the_line_says_so_and_asks(self):
     self.assertEqual(verdict.tokens_line({"known": False}),
                      "Tokens: not in this log. Do you want to reduce your token spend for this agentic loop to zero? Find out how: https://tinyailabs.com/")

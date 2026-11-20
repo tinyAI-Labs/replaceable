@@ -190,11 +190,11 @@ def audit(log="logs/early.jsonl", heldout="logs/heldout.jsonl", schema="schema.j
     stats.emit({"error": f"the {MAX_DERIVE_RUNS} --derive runs are used; nothing was changed. Go on without a new --derive.", "derive_tried": tried,
                 "next": RUN_COMMAND})
     raise SystemExit(1)
+  meta = stats.read_json(metadata)
   state: dict[str, Any] = {"early_sha256": early_sha, "scope_choice": scope, "derive": kept, "derive_tried": tried, "derive_runs": len(tried),
-                           "triage": triage(rows, schema_, stats.read_json(metadata), Path(heldout), n_total, scope),
+                           "triage": triage(rows, schema_, meta, Path(heldout), n_total, scope),
                            "tokens": stats.token_stats(rows), "runs_per_day": stats.runs_per_day(rows),
-                           "learning": stats.read_json(metadata).get("learning"),
-                           "log_tokens": stats.read_json(metadata).get("tokens")}
+                           "learning": meta.get("learning"), "log_tokens": meta.get("tokens")}
   if "exit" not in state["triage"]: state["conflicts"] = conflicts(rows, schema_)
   if "exit" not in state.get("conflicts", {"exit": 1}):
     lean.require_lean()
