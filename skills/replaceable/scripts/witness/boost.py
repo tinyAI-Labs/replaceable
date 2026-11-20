@@ -1,4 +1,4 @@
-# gradient-boosted trees: a tiny model that learns a loop's answers from the early cases, to find out whether the typed fields decide them
+# gradient-boosted trees: a small model that learns a loop's answers from the early cases, to find out whether the typed fields decide them
 # NOTE: a model is trained in memory for one exam and thrown away. Nothing here writes a file or keeps a model, so the skill reports what the
 # model showed about the loop and hands over nothing that could stand in for it. There is no randomness: the same cases give the same model
 # (on one machine: a floating-point tie may break differently on another). Standard library only. The work grows with cases x fields x

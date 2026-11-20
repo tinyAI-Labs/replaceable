@@ -5,7 +5,7 @@ from pathlib import Path
 
 MAX_LINE_COUNT, TOKENS = 1402, {token.OP, token.NAME, token.NUMBER, token.STRING}
 
-MAX_TINYAI_LINES = 110  # the optional tiny-model code in scripts/tinyai/ has a budget of its own: the core budget stays the size of the skill
+MAX_WITNESS_LINES = 110  # the optional learned-witness code in scripts/witness/ has a budget of its own: the core budget stays the size of the skill
 
 def lines(path):
   tokens = tokenize.generate_tokens(open(path, encoding="utf-8").readline)
@@ -21,5 +21,5 @@ def over(root, pattern, budget):
 
 if __name__ == "__main__":
   root = Path(__file__).parent
-  core, tinyai = over(root, "skills/*/scripts/*.py", MAX_LINE_COUNT), over(root, "skills/*/scripts/tinyai/*.py", MAX_TINYAI_LINES)
-  sys.exit("over the line budget" if core or tinyai else 0)
+  core, witness = over(root, "skills/*/scripts/*.py", MAX_LINE_COUNT), over(root, "skills/*/scripts/witness/*.py", MAX_WITNESS_LINES)
+  sys.exit("over the line budget" if core or witness else 0)

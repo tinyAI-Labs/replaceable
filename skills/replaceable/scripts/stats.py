@@ -75,7 +75,7 @@ def emit(report: dict[str, Any], trim: Sequence[str] = ()):
   print(text)
 
 def show(text: str):
-  # text that may hold non-ASCII characters (a hand-written rule, a --derive expression) on any terminal encoding
+  # text that may hold non-ASCII characters (a --derive expression, a field name) on any terminal encoding
   encoding = sys.stdout.encoding or "ascii"
   print(text.encode(encoding, errors="backslashreplace").decode(encoding))
 

@@ -4,7 +4,7 @@ from unittest import mock
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "skills" / "replaceable" / "scripts"))
 import stats
-from tinyai import exam
+from witness import exam
 
 SCHEMA = {"input": [{"name": "x", "type": "nat"}, {"name": "y", "type": "nat"}], "output": {"name": "output", "values": ["a", "b"]}}
 

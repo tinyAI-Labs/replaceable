@@ -1,5 +1,5 @@
 # the whole procedure in one command: the audit of the early half, the one-shot held-out replay, the verdict
-# usage: python3 scripts/run.py [--scope full|decision_step_only] [--derive "x.account_no % 10"]... [--note "..."] [--why]
+# usage: python3 scripts/run.py [--scope full|decision_step_only] [--derive "x.account_no % 10"]... [--note "..."] [--why] [--usd-per-mtok P]
 # NOTE: it runs every step itself and ends with the `Answer:` and `Tokens:` lines; `--why` adds the audit, the replay report and the
 # `VERDICT:`, `WHY:` and `TOKENS:` lines before them. A weak rule is not a question: it takes the exam as it is and ends
 # INCONCLUSIVE. Before the verdict it stops only where it cannot go on alone, with the exact command to continue (NEXT) and the reason
@@ -37,7 +37,7 @@ def main():
   parser.add_argument("--derive", action="append", default=None, metavar="LEAN_EXPR",
                       help='a quantity you know the policy uses, as a Nat-valued Lean expression of x, e.g. "x.account_no %% 10"; repeatable')
   parser.add_argument("--note", default=None, help="your own remark, appended to the verdict's rationale")
-  parser.add_argument("--why", action="store_true", help="also print the audit, the replay, VERDICT, WHY, TOKENS (default: answer and sign-up only)")
+  parser.add_argument("--why", action="store_true", help="also print the audit, the replay, VERDICT, WHY, TOKENS (default: Answer and Tokens only)")
   parser.add_argument("--usd-per-mtok", type=float, default=None, help="what you pay per million tokens: the answer then quotes the cost too")
   args = parser.parse_args()
 

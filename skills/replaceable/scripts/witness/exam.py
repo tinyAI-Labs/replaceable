@@ -3,7 +3,7 @@
 from __future__ import annotations
 from typing import Any, Sequence
 import stats
-from tinyai import boost
+from witness import boost
 
 MAX_CASES = 5_000  # cases trained on, and scored (stats.sample keeps a fixed, unbiased share)
 MAX_WORK = 1_300_000  # cases x columns x outputs, about half a minute of fitting: a wide log trains on fewer cases, and on none when that is too few
@@ -22,5 +22,5 @@ def exam(schema: stats.Schema, early: Sequence[stats.Row], heldout: Sequence[sta
   low = round(stats.clopper_pearson_lower(k, len(held), CONFIDENCE), 4)
   base = round(stats.baseline([r["output"] for r in held], schema["output"]["values"])[1], 4)
   return {"n": len(held), "n_match": k, "lower_bound": low, "baseline": base,
-          "why": f"A tiny model trained on the early cases reproduced {k} of {len(held)} (99% lower bound {low}; always answering the most "
+          "why": f"A model learned from the early cases reproduced {k} of {len(held)} (99% lower bound {low}; always answering the most "
                  f"common output would match {base}). It is evidence that the typed fields decide the output; the model is discarded."}

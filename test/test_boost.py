@@ -2,7 +2,7 @@
 import random, sys, unittest
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "skills" / "replaceable" / "scripts"))
-from tinyai import boost
+from witness import boost
 
 def schema(*fields, values=("a", "b")): return {"input": list(fields), "output": {"name": "output", "values": list(values)}}
 NUMBERS = schema({"name": "x", "type": "nat"}, {"name": "y", "type": "nat"})
