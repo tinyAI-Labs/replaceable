@@ -96,8 +96,7 @@ the skill learns a model, gradient-boosted trees in pure Python (`scripts/witnes
 same held-back half in the same replay, and keeps only the numbers. The model is trained in memory and discarded: nothing is written, nothing ships, and
 it cannot stand in for the loop. `DETERMINISTIC_LEARNED` means the typed fields decide the output, so the policy can be written down; it is never given
 instead of a verdict a rule earned, only where the rule-only skill would say `INCONCLUSIVE`, and its bar is stricter (99% lower bound, not 95%).
-Delete `scripts/witness/` and the skill is the rule-only skill. On the bench's 2,000-case logs it found 2 loops the rule alone missed and called no
-probabilistic loop deterministic in 81 such cells; it needs large logs (a 95% accuracy cannot clear a 95% bound on a few hundred cases).
+Delete `scripts/witness/` and the skill is the rule-only skill. It needs large logs (a 95% accuracy cannot clear a 95% bound on a few hundred cases).
 
 ## Layout
     skills/replaceable/SKILL.md          the procedure the agent follows, the hard rules, the verdict table

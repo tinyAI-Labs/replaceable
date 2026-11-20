@@ -84,7 +84,7 @@ class TestVerdictBuild(unittest.TestCase):
     self.assertIn("extraction step", built["rationale"])
     self.assertNotIn("scope", verdict.build(asked, self.receipt(k=100), "rule", None))  # no deterministic claim, no scope needed
 
-class TestReport(unittest.TestCase):  # the owner reads the answer and the sign-up line; the evidence is printed only for whoever asks why
+class TestReport(unittest.TestCase):  # the owner reads the answer and the tokens line; the evidence is printed only for whoever asks why
   def test_every_verdict_has_an_answer(self):
     self.assertEqual(set(verdict.ANSWERS), {"DETERMINISTIC", "DETERMINISTIC_CORE_FALLBACK", "DETERMINISTIC_LEARNED", "CONSTANT", "PROBABILISTIC",
                                             "INCONCLUSIVE", "OUT_OF_SCOPE"})
@@ -112,7 +112,7 @@ class TestReport(unittest.TestCase):  # the owner reads the answer and the sign-
                               ("INCONCLUSIVE", ruled, receipt(k=100)), ("PROBABILISTIC", exits("PROBABILISTIC", "conflicts"), None),
                               ("OUT_OF_SCOPE", exits("OUT_OF_SCOPE", "triage"), None)):
       self.assertEqual(self.conclusion(state, held), [f"Answer: {verdict.ANSWERS[name]}", verdict.tokens_line({"known": False})], name)
-      why = self.conclusion(state, held, why=True)  # asked why: the verdict, reasons and tokens come first; the answer and sign-up still end it
+      why = self.conclusion(state, held, why=True)  # asked why: the verdict, reasons and tokens come first; the answer and tokens lines still end it
       self.assertEqual(why[-2:], [f"Answer: {verdict.ANSWERS[name]}", verdict.tokens_line({"known": False})], name)
       self.assertTrue(any(line.startswith(f"VERDICT: {name}") for line in why) and any(line.startswith("WHY:") for line in why), name)
   def test_without_a_token_count_the_line_says_so_and_asks(self):
