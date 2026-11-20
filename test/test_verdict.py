@@ -129,8 +129,8 @@ class TestReport(unittest.TestCase):  # the owner reads the answer and the token
     always = {**plain, "learning": {"converged": True, "runs": 600}}  # right from the start: nothing was set aside
     self.assertEqual(verdict.answer_line(always), "Answer: Yes, deterministic.")
     never = {"verdict": "PROBABILISTIC", "learning": {"converged": False, "runs": 900, "accuracy": 0.76, "examined_from": 450}}
-    self.assertEqual(verdict.answer_line(never),
-                     "Answer: No, not deterministic. Its feedback never holds 95% (76% over the latest half of the log): that half was checked.")
+    self.assertEqual(verdict.answer_line(never), "Answer: No, not deterministic. Its feedback never holds 95% (76% over its latest quarter): "
+                     "the latest part of the log was checked.")
   def test_the_learning_phase_is_priced_against_the_converged_loop(self):
     spend = {"known": True, "per_run": 1000.0, "logged": 300_000, "cases_with_tokens": 300,
              "learning": {"from_run": 1300, "accuracy_before": 0.85, "tokens": {"with_tokens": 1300, "mean": 2500.0}}}
@@ -140,6 +140,20 @@ class TestReport(unittest.TestCase):  # the owner reads the answer and the token
     self.assertNotIn("before it converged", verdict.tokens_line({**spend, "learning": None}))
     self.assertIn("over its 300 runs after it converged", verdict.tokens_line(spend))
     self.assertNotIn("before it converged", verdict.tokens_line({**spend, "cases_with_tokens": 10}))  # the converged side is too short to compare too
+  def test_the_token_block_carries_the_learning_phase_to_the_line(self):
+    state = {"tokens": {"with_tokens": 5, "total": 500, "mean": 100.0}, "log_tokens": {"with_tokens": 60, "total": 6000, "mean": 100.0},
+             "learning": {"converged": True, "runs": 500, "from_run": 40, "accuracy_before": 0.7, "tokens": {"with_tokens": 40, "mean": 300.0}}}
+    block = verdict.token_block(state, None, {"verdict": "DETERMINISTIC"})
+    self.assertEqual(block["learning"]["from_run"], 40)
+    self.assertIn("the 40 runs before it converged (70% accurate) used 300 per run, 3.0x as much", verdict.tokens_line(block))
+  def test_a_moving_loop_is_inconclusive_whatever_the_exam_says(self):
+    ruled = {"triage": {"scope": "full"}, "fit": {"rule_sha256": stats.sha256("rule")}, "learning": {"unsettled": {"recent": 0.92, "before": 0.86}}}
+    said = verdict.build(ruled, {"rule_sha256": stats.sha256("rule"), **report()}, "rule", None)
+    self.assertEqual((said["verdict"], said["exit_stage"]), ("INCONCLUSIVE", "feedback"))
+    self.assertIn("92% right over its latest quarter, 86% the quarter before", said["rationale"])
+    moving = {"verdict": "INCONCLUSIVE", "learning": {"converged": False, "runs": 900, "unsettled": {"recent": 0.92, "before": 0.86}}}
+    self.assertEqual(verdict.answer_line(moving), "Answer: Cannot tell from this log. Its feedback has not settled at 95% "
+                     "(92% over its latest quarter, 86% the quarter before): run this again once it holds.")
   def test_an_early_exit_quotes_the_whole_log_not_the_half_it_audited(self):
     half, whole = {"with_tokens": 5, "total": 50, "mean": 10.0}, {"with_tokens": 10, "total": 100, "mean": 10.0}
     block = verdict.token_block({"tokens": half, "log_tokens": whole}, None, {"verdict": "PROBABILISTIC"})

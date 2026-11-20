@@ -34,7 +34,7 @@ Give the agent a log and ask whether the loop is replaceable, or run the two com
     python3 $S/run.py                 # audit, one-shot replay, verdict: ends with an Answer and a Tokens line (add --why for VERDICT / WHY / TOKENS)
 
 To try it first, copy `examples/ticket_triage/raw.jsonl` (6,000 runs of a support-ticket router that learned its routing from corrections) into an empty directory: the
-output ends with `Answer: Yes, deterministic. Checked on the runs after the loop reached 95% accuracy ...` and a `Tokens:` line with what the loop spends, now and while it was learning. Add `--why` to `run.py` (it resumes, nothing is replayed again) to also see the `VERDICT:`, `WHY:` and `TOKENS:` lines; an agent running the skill prints them only if you ask why. Four more examples are below.
+output ends with `Answer: Yes, deterministic. Checked on the runs after the loop held 95% accuracy ...` and a `Tokens:` line with what the loop spends, now and while it was learning. Add `--why` to `run.py` (it resumes, nothing is replayed again) to also see the `VERDICT:`, `WHY:` and `TOKENS:` lines; an agent running the skill prints them only if you ask why. Four more examples are below.
 
 `raw.jsonl` has one logged run per line: `{"typed_input": {...}, "output": ..., "ts": ..., "tokens": 1840, "correct": true}`. `typed_input` holds numbers,
 booleans, dates and categories; `ts`, `case_id`, the token count and `correct` are optional. At least 150 runs are needed. `run.py` asks at most one question (the scope:
@@ -53,7 +53,7 @@ override, a check) until it is right at least 95% of the time, or does not get t
 | `refund_agent` | improves but plateaus near 80%: the same inputs still get different answers | PROBABILISTIC (it never settles at 95%) |
 | `lead_router_memory` | reaches 95%, but enterprise leads go to the two reps in a rotation the loop keeps in its notes and the log does not carry | INCONCLUSIVE (hidden state) |
 
-The answer says after which run the loop held 95% (or that its feedback never does), and the `Tokens:` line says what the runs before that cost compared with the converged loop.
+The answer says after which run the loop held 95% (or that its feedback never does, or has not settled), and the `Tokens:` line says what the runs before that cost compared with the converged loop.
 Something to try: delete the `correct` field from every line of `ticket_triage`: the exam then runs on the whole log, the learning phase is mixed in,
 and the same inputs now got different answers at different times: it comes out PROBABILISTIC.
 
@@ -77,8 +77,9 @@ was made from, and the decision. From a trace or message-list export, roughly:
 - At least 150 runs (after the learning phase, if the log has one); a policy with many branches needs about 1000 or more before a rule can pass, and about 2000 for the learned check.
 - `correct` is the loop's own feedback on a run: a human override, a test, an eval score turned into pass or fail, as tracing tools record it. With it on
   every line, the skill sets aside the runs before the loop held 95% (its learning phase), examines the rest, and reports what the learning phase cost
-  per run against the converged loop. A loop that never holds 95% is examined as a whole log. Without `correct`, the whole log is examined and a loop that
-  is still learning looks like one that drifted or guesses (`PROBABILISTIC`, or `INCONCLUSIVE`).
+  per run against the converged loop. A loop whose feedback is still moving (rising, or at 95% for fewer than 150 runs) is `INCONCLUSIVE`: it has no fixed
+  policy yet. One that stays flat below 95% is examined on its latest half. Without `correct`, the whole log is examined, and a loop that is still
+  learning looks like one that drifted or guesses (`PROBABILISTIC`, or `INCONCLUSIVE`). Under 150 runs `correct` is ignored.
 
 ## Tokens and savings
 Log a token count per run as `tokens` (the run's total), or as the SDKs report it: `usage.input_tokens` + `usage.output_tokens` (cache tokens are

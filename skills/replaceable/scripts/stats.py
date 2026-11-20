@@ -116,8 +116,17 @@ def converged_from(correct: Sequence[bool]) -> int | None:
   if plateau < PLATEAU: return None
   floor, start = plateau - 4 * sqrt(PLATEAU * (1 - PLATEAU) / WINDOW), n
   while start and sum(correct[max(0, start - WINDOW):start]) >= floor * (start - max(0, start - WINDOW)): start = max(0, start - WINDOW)
-  while n - start >= MIN_TAIL and sum(correct[start:]) < PLATEAU * (n - start): start += WINDOW
+  holds = lambda part: sum(part) >= PLATEAU * len(part)  # noqa: E731
+  while n - start >= MIN_TAIL and not (holds(correct[start:]) and holds(correct[start:start + 3 * WINDOW])):
+    start += WINDOW  # the whole tail, and its oldest stretch, hold 95%: a long spell below it is not folded in by what comes after
   return start if n - start >= MIN_TAIL else None
+
+def unsettled(correct: Sequence[bool]) -> tuple[float, float] | None:
+  # for a loop that does not hold 95%: (latest quarter, the quarter before) if its feedback is still moving (rising, falling, or back at 95% too
+  # recently to count), None if it is flat. A moving loop has no policy to test yet; a flat one is examined as it is
+  quarter = len(correct) // 4
+  recent, before = (sum(part) / quarter for part in (correct[-quarter:], correct[-2 * quarter:-quarter]))
+  return (recent, before) if recent >= PLATEAU or abs(recent - before) > 0.03 else None
 
 def runs_per_day(rows: Sequence[Row]) -> float | None:
   # the pace a token count is extrapolated at; None unless `ts` are ISO timestamps that span a day (a counter, or no ts, says nothing about time)

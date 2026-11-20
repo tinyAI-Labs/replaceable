@@ -160,22 +160,31 @@ def main():
   rows.sort(key=lambda r: (str(r["ts"]) if not isinstance(r["ts"], (int, float)) else f"{r['ts']:020.6f}", r["case_id"]))
   notes: list[str] = []
   learning = None
-  if all("correct" in r for r in rows):  # NOTE: the loop's own feedback, read on the whole log: the runs before it held 95% are not the policy
-    found = stats.converged_from([r["correct"] for r in rows])
-    start = len(rows) // 2 if found is None else found  # it never holds 95%: the latest half is examined, the least marked by what it learned early
-    seen = rows[start:]
-    learning = {"converged": found is not None, "runs": len(rows), "accuracy": round(sum(r["correct"] for r in seen) / len(seen), 3)}
-    if start and learning["converged"]:
-      before = rows[:start]
-      learning |= {"from_run": start, "accuracy_before": round(sum(r["correct"] for r in before) / start, 3), "tokens": stats.token_stats(before)}
-      notes.append(f"the loop held 95% accuracy after run {start} of {len(rows)}: those {start} runs are its learning phase, the rest is examined")
-    elif not learning["converged"]:
-      learning["examined_from"] = start
-      notes.append(f"the loop's feedback never holds 95% ({learning['accuracy']:.0%} over the latest half): the latest half of the log is examined")
-    rows = seen
+  if len(rows) >= stats.MIN_TAIL and all("correct" in r for r in rows):  # NOTE: the loop's own feedback, read on the whole log
+    correct = [r["correct"] for r in rows]
+    found = stats.converged_from(correct)
+    if found is not None:
+      tail = sum(correct[found:]) / (len(rows) - found)
+      before = sum(correct[:found]) / found if found else tail
+      if tail - before < 0.03: found = 0  # not clearly worse before: there was no learning phase to set aside
+      learning = {"converged": True, "runs": len(rows), "accuracy": round(tail, 3)}
+      if found:
+        learning |= {"from_run": found, "accuracy_before": round(before, 3), "tokens": stats.token_stats(rows[:found])}
+        notes.append(f"the loop held 95% accuracy after run {found} of {len(rows)}: those {found} runs are its learning phase, the rest is examined")
+        rows = rows[found:]
+    else:  # it does not hold 95%: a flat loop is examined on its latest half (the least marked by what it learned early), a moving one only reported
+      start = len(rows) // 2 if len(rows) // 2 >= stats.MIN_TAIL else 0
+      moving = stats.unsettled(correct)
+      quarter = len(correct) // 4
+      learning = {"converged": False, "runs": len(rows), "accuracy": round(sum(correct[-quarter:]) / quarter, 3), "examined_from": start}
+      if moving: learning["unsettled"] = {"recent": round(moving[0], 3), "before": round(moving[1], 3)}
+      notes.append("the loop's feedback has not settled: it is reported as INCONCLUSIVE" if moving else
+                   f"the loop's feedback never holds 95% ({learning['accuracy']:.0%} over its latest quarter): its latest part is examined")
+      rows = rows[start:]
   if args.max_rows and len(rows) > args.max_rows:
     notes.append(f"kept the latest {args.max_rows} of {len(rows)} cases (--max-rows)")
     rows = rows[-args.max_rows:]
+    if learning: learning |= {"trimmed": True, "accuracy": round(sum(r["correct"] for r in rows) / len(rows), 3)}
   elif len(rows) > LARGE_LOG:
     notes.append(f"{len(rows)} cases: the fit and the Lean runs may take minutes or time out; --max-rows {LARGE_LOG} keeps the latest {LARGE_LOG}")
 

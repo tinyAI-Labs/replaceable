@@ -84,9 +84,22 @@ class TestPrepareLearning(unittest.TestCase):  # `correct` on every run sets the
     self.assertEqual(code, 0)
     self.assertEqual((meta["learning"]["converged"], meta["learning"]["examined_from"], meta["learning"]["accuracy"]), (False, 500, 0.8))
     self.assertEqual(meta["n_total"], 500)
+  def test_a_loop_whose_feedback_is_still_moving_is_marked_unsettled(self):
+    rising = lambda i: i % 5 >= 2 if i < 700 else i % 10 != 0  # noqa: E731  60%, then 90%: still rising
+    _, _, meta = self.prepare(self.run_of(1000, rising))
+    self.assertEqual((meta["learning"]["converged"], meta["learning"]["unsettled"]), (False, {"recent": 0.9, "before": 0.66}))
+    _, _, meta = self.prepare(self.run_of(100, lambda i: False))  # too short to have a learning phase at all
+    self.assertNotIn("learning", meta)
+  def test_flat_below_95_in_a_short_log_is_examined_whole(self):
+    _, _, meta = self.prepare(self.run_of(260, lambda i: i % 5 != 0))
+    self.assertEqual((meta["learning"]["examined_from"], meta["n_total"]), (0, 260))  # halving 260 runs would leave under 150
+  def test_a_log_that_was_good_from_the_start_has_no_learning_phase(self):
+    _, _, meta = self.prepare(self.run_of(600, lambda i: i % 25 != 0))  # 96% throughout
+    self.assertNotIn("from_run", meta["learning"])
   def test_the_learning_phase_is_found_before_max_rows_trims_the_log(self):
     code, _, meta = self.prepare(self.run_of(1000, lambda i: i >= 300 or i % 5 >= 2), "--max-rows", "400")
     self.assertEqual((code, meta["learning"]["from_run"], meta["learning"]["runs"], meta["n_total"]), (0, 300, 1000, 400))
+    self.assertTrue(meta["learning"]["trimmed"])
 
 class TestPrepareInput(unittest.TestCase):  # a log that is not JSON lines must be told so, not crash
   def run_on(self, text):

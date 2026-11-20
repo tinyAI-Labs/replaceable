@@ -76,6 +76,19 @@ class TestConvergedFrom(unittest.TestCase):  # where a self-optimizing loop sett
     self.assertIsNone(stats.converged_from([True] * 100))  # too short to tell
     self.assertIsNone(stats.converged_from([False] * 500 + [True] * 120))  # settled too recently: fewer than 150 clean runs
     self.assertIsNone(stats.converged_from([True] * 3000 + [False] * 60))  # it regressed at the end: the last block does not hold
+  def test_a_long_spell_below_95_percent_is_not_folded_into_the_tail(self):
+    start = stats.converged_from([i % 25 < 23 for i in range(4000)] + [True] * 3000)  # 92% for 4000 runs, then clean: together above 95%
+    self.assertGreaterEqual(start, 3600)
+
+class TestUnsettled(unittest.TestCase):  # a loop that does not hold 95%: moving (nothing to test yet) or flat (examined as it is)
+  def test_a_flat_loop_is_not_moving(self):
+    self.assertIsNone(stats.unsettled([i % 5 != 0 for i in range(2000)]))  # 80% throughout
+  def test_a_rising_loop_a_falling_one_and_one_back_at_95_are_moving(self):
+    rising = [i % 5 >= 2 for i in range(750)] + [i % 10 != 0 for i in range(250)]  # 60% then 90%
+    self.assertEqual(stats.unsettled(rising), (0.9, 0.6))
+    self.assertEqual(stats.unsettled([True] * 1000 + [i % 5 >= 2 for i in range(500)])[0], 0.6)  # it fell off
+    dip = [True] * 5000 + [False] * 40 + [True] * 80  # one bad block at the end of a long good run: the quarter is at 97%, the tail did not hold
+    self.assertGreaterEqual(stats.unsettled(dip)[0], 0.95)
 
 class TestRunsPerDay(unittest.TestCase):  # the pace a token count is extrapolated at: only real timestamps say how long the log took
   def rows(self, *ts): return [{"case_id": f"c{i}", "ts": t} for i, t in enumerate(ts)]
