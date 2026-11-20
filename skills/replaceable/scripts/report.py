@@ -7,11 +7,10 @@ from typing import Any
 import verdict as v
 
 BARS = "▁▂▃▄▅▆▇█"
-LOOK = {"DETERMINISTIC": "good", "CONSTANT": "good", "DETERMINISTIC_LEARNED": "good", "DETERMINISTIC_CORE_FALLBACK": "warn",
+LOOK = {"DETERMINISTIC": "good", "CONSTANT": "good", "DETERMINISTIC_LEARNED": "good",
         "INCONCLUSIVE": "warn", "PROBABILISTIC": "bad", "OUT_OF_SCOPE": "none"}
 NEXT = {"DETERMINISTIC": "A person confirms that Rule.lean matches the written policy before it replaces the loop.",
         "CONSTANT": "A person confirms that the loop really never varies before it is replaced by a constant.",
-        "DETERMINISTIC_CORE_FALLBACK": "A person confirms Rule.lean; the loop keeps handling the fallback region and the rule takes over the rest.",
         "DETERMINISTIC_LEARNED": "The runs are reproducible but no short rule states them: a small trained model would replace the loop, not a rule.",
         "PROBABILISTIC": "The same inputs get different answers: no fixed rule or small model can replace this loop as it is.",
         "INCONCLUSIVE": "Add more runs (and `correct` per run), or let the loop settle, and run this again.",

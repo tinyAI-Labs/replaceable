@@ -5,17 +5,17 @@ import argparse, json, sys
 from pathlib import Path
 from typing import Any
 import stats
-from stats import BOUND_CORE, BOUND_DETERMINISTIC, MIN_HELDOUT
+from stats import BOUND_DETERMINISTIC, MIN_HELDOUT
 from replay import read_receipt
 from audit import AUDIT_COMMAND, AUDIT_FILE, REPLAY_COMMAND, RUN_COMMAND, VERDICT_COMMAND, weak_note
 
-SCOPED = ("DETERMINISTIC", "DETERMINISTIC_CORE_FALLBACK", "DETERMINISTIC_LEARNED", "CONSTANT")
+SCOPED = ("DETERMINISTIC", "DETERMINISTIC_LEARNED", "CONSTANT")
 
 ASK = "Do you want to reduce your token spend for this agentic loop to zero? Find out how: https://tinyailabs.com/"
 # NOTE: the owner's whole report is two lines: one answer per verdict and what the loop spends. How the verdict came about is printed only on --why.
 MIN_PHASE = 30  # runs a phase needs before its token cost is compared with the other's
 ANSWERS = {
-  "DETERMINISTIC": "Yes, deterministic.", "DETERMINISTIC_CORE_FALLBACK": "Mostly deterministic.", "CONSTANT": "Yes, constant.",
+  "DETERMINISTIC": "Yes, deterministic.", "CONSTANT": "Yes, constant.",
   "DETERMINISTIC_LEARNED": "Yes, deterministic (no readable rule).", "PROBABILISTIC": "No, not deterministic.",
   "INCONCLUSIVE": "Cannot tell from this log.", "OUT_OF_SCOPE": "Not applicable: the output is free text, not a typed decision."}
 
@@ -75,20 +75,10 @@ def verdict_from_replay(replay: dict[str, Any]) -> tuple[str, str]:
     if stats.beats_baseline(low, base): return "DETERMINISTIC", f"{seen}; always answering the most common output would match {base}."
     return "INCONCLUSIVE", (f"{seen}, but always answering the most common output already matches {base}: "
                             "there are too few cases of the other outputs to tell a rule from a constant.")
-  fb = replay.get("fallback")
-  if low >= BOUND_CORE and fb and fb["inside"] >= 1 and fb["outside"] >= MIN_HELDOUT and fb["outside_lower_bound"] >= BOUND_DETERMINISTIC:
-    return "DETERMINISTIC_CORE_FALLBACK", (
-      f"{seen}; outside the declared fallback region it matched {fb['outside'] - fb['misses_outside']} of {fb['outside']} "
-      f"(95% lower bound {fb['outside_lower_bound']}), and {fb['inside']} held-back cases fall inside the region.")
   model = replay.get("model")  # NOTE: last of the passing rows: the model turns an INCONCLUSIVE into a verdict, never one verdict into another
   if model and model["lower_bound"] >= BOUND_DETERMINISTIC and stats.beats_baseline(model["lower_bound"], model["baseline"]):
     return "DETERMINISTIC_LEARNED", f"{seen}: no readable rule reaches {BOUND_DETERMINISTIC}. {model['why']}"
-  if low >= BOUND_CORE:
-    why = "no fallback region was declared" if not fb else (
-      f"the fallback region does not contain the misses ({fb['misses_outside']} misses in the {fb['outside']} cases outside it, "
-      f"95% lower bound {fb['outside_lower_bound']}; {BOUND_DETERMINISTIC} on at least {MIN_HELDOUT} cases is needed)")
-    return "INCONCLUSIVE", f"{seen}: below {BOUND_DETERMINISTIC}, and {why}."
-  return "INCONCLUSIVE", f"{seen}: below {BOUND_CORE}. No rule was found; that alone does not show the loop is probabilistic."
+  return "INCONCLUSIVE", f"{seen}: below {BOUND_DETERMINISTIC}. No rule reaches it; that alone does not show the loop is probabilistic."
 
 def build(state: dict[str, Any], receipt: dict[str, Any] | None, rule_src: str | None, scope: str | None) -> dict[str, Any]:
   # the verdict object, or {"error": ..., "needs": the missing step} when it cannot be given yet
@@ -125,8 +115,6 @@ def build(state: dict[str, Any], receipt: dict[str, Any] | None, rule_src: str |
     verdict["scope"] = scope or state["triage"]["scope"]
     if verdict["scope"] == "decision_step_only":
       verdict["rationale"] += " Scope: the decision step on typed fields only; the extraction step that produces those fields stays probabilistic."
-  if name == "DETERMINISTIC_CORE_FALLBACK":
-    verdict["fallback_region"] = fit.get("fallback", {}).get("region") or "the region where `fallback` in Rule.lean is true"
   if name == "INCONCLUSIVE" and ran and receipt["lower_bound"] < BOUND_DETERMINISTIC: verdict["rationale"] += weak_note(fit)
   if name == "INCONCLUSIVE" and (scan.get("near") or {}).get("neighbour_disagreement") is not None and ran:
     verdict["rationale"] += (f" Diagnostic: {scan['near']['neighbour_disagreement']:.0%} of early cases differ from their nearest neighbour (random "
@@ -151,9 +139,6 @@ def token_block(state: dict[str, Any], receipt: dict[str, Any] | None, verdict: 
   if not halves: return {"known": False, "note": "no token count in the log lines; add `tokens` (or `usage`) per case to get token use and savings"}
   n, total, name = sum(t["with_tokens"] for t in halves.values()), sum(t["total"] for t in halves.values()), verdict["verdict"]
   if name in ("DETERMINISTIC", "CONSTANT"): share, why = 1.0, f"{name}: the rule takes over every run"
-  elif name == "DETERMINISTIC_CORE_FALLBACK":
-    outside, held = receipt["fallback"]["outside"], receipt["n_heldout"]
-    share, why = round(outside / held, 4), f"{outside} of {held} held-back cases lie outside the fallback region; the rest stays with the LLM"
   else: share, why = 0.0, f"{name}: no rule replaces the loop"
   mean = round(total / n, 1)
   block = {"known": True, "per_run": mean, "logged": total, "cases_with_tokens": n, "halves": halves, "rule_share": share,

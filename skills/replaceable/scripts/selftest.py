@@ -32,7 +32,7 @@ def summary(rng: Random):
   return x, f"Customer wrote about {x['topic']}; reference {int(rng.random() * 1_000_000)}."
 
 def refund(rng: Random):
-  # core plus fallback: a threshold per reason, except damaged goods between 50 and 200 euros, which vary
+  # a threshold per reason, except damaged goods between 50 and 200 euros, where a person decides: a rule cannot reach 95%
   x = {"reason": _pick(rng, ("late", "damaged", "unwanted")), "amount_cents": int(rng.random() * 40_000)}
   if x["reason"] == "damaged" and 5_000 <= x["amount_cents"] < 20_000: return x, "manual" if rng.random() < 0.65 else "refund"
   return x, "refund" if x["amount_cents"] < {"late": 10_000, "damaged": 5_000, "unwanted": 2_500}[x["reason"]] else "manual"
@@ -60,7 +60,7 @@ LOOPS: tuple[tuple[str, Draw, int, str, dict[str, Any]], ...] = (
   ("shipping", shipping, 600, "DETERMINISTIC", {"host": True}),
   ("ticket", ticket, 400, "PROBABILISTIC", {}),
   ("summary", summary, 300, "OUT_OF_SCOPE", {}),
-  ("refund", refund, 800, "DETERMINISTIC_CORE_FALLBACK", {}),
+  ("refund", refund, 800, "INCONCLUSIVE", {}),
   ("shipping_small", shipping, 100, "INCONCLUSIVE", {}),
   ("order", order, 600, "DETERMINISTIC", {}),
   ("shard", shard, 600, "DETERMINISTIC", {"derive": "x.ticket_no % 2"}),

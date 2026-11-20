@@ -12,9 +12,6 @@ def model(n=200, k=200, base=0.5, low=None):  # what the learned model scored on
   low = round(stats.clopper_pearson_lower(k, n, 0.99), 4) if low is None else low
   return {"model": {"n": n, "n_match": k, "why": "A learned model reproduced them.", "baseline": base, "lower_bound": low}}
 
-def fallback(inside=40, outside=160, misses_outside=0, bound=0.97):
-  return {"fallback": {"inside": inside, "outside": outside, "misses_outside": misses_outside, "outside_lower_bound": bound}}
-
 class TestVerdictTable(unittest.TestCase):
   def name(self, replay_): return verdict.verdict_from_replay(replay_)[0]
   def test_failed_replay(self): self.assertEqual(self.name({"failure": "replay_timeout"}), "INCONCLUSIVE")
@@ -31,12 +28,9 @@ class TestVerdictTable(unittest.TestCase):
     self.assertEqual(self.name(report(low=0.98, base=0.96)), "DETERMINISTIC")
     self.assertEqual(self.name(report(low=0.9799, base=0.96)), "INCONCLUSIVE")
     self.assertIn("tell a rule from a constant", verdict.verdict_from_replay(report(low=0.9799, base=0.96))[1])
-  def test_core_fallback(self):
-    self.assertEqual(self.name(report(low=0.85, **fallback())), "DETERMINISTIC_CORE_FALLBACK")
-    self.assertEqual(self.name(report(low=0.80, **fallback(bound=0.95))), "DETERMINISTIC_CORE_FALLBACK")
-    for weak in (fallback(outside=59), fallback(inside=0), fallback(bound=0.9499), {}):
-      self.assertEqual(self.name(report(low=0.85, **weak)), "INCONCLUSIVE")
-    self.assertEqual(self.name(report(low=0.7999, **fallback())), "INCONCLUSIVE")
+  def test_a_rule_below_the_bar_is_inconclusive_however_close_it_is(self):
+    for low in (0.9499, 0.85, 0.5): self.assertEqual(self.name(report(low=low)), "INCONCLUSIVE")
+    self.assertIn("below 0.95", verdict.verdict_from_replay(report(low=0.85))[1])
   def test_learned_model(self):  # the model only turns an INCONCLUSIVE into a verdict; every other row is decided without it
     name, why = verdict.verdict_from_replay(report(k=100, **model()))
     self.assertEqual(name, "DETERMINISTIC_LEARNED")
@@ -46,7 +40,7 @@ class TestVerdictTable(unittest.TestCase):
     self.assertEqual(self.name(report(k=100, **model(low=0.97, base=0.96))), "INCONCLUSIVE")  # no better than always answering the commonest output
     self.assertEqual(self.name(report(n=59, k=40, **model(n=59, k=59))), "INCONCLUSIVE")
     self.assertEqual(self.name(report(low=0.98, **model(low=0.0))), "DETERMINISTIC")
-    self.assertEqual(self.name(report(low=0.85, **fallback(), **model())), "DETERMINISTIC_CORE_FALLBACK")
+    self.assertEqual(self.name(report(low=0.85, **model())), "DETERMINISTIC_LEARNED")
   def test_weak_rule_is_never_probabilistic(self):
     name, why = verdict.verdict_from_replay(report(k=100))
     self.assertEqual(name, "INCONCLUSIVE")
@@ -86,8 +80,7 @@ class TestVerdictBuild(unittest.TestCase):
 
 class TestReport(unittest.TestCase):  # the owner reads the answer and the tokens line; the evidence is printed only for whoever asks why
   def test_every_verdict_has_an_answer(self):
-    self.assertEqual(set(verdict.ANSWERS), {"DETERMINISTIC", "DETERMINISTIC_CORE_FALLBACK", "DETERMINISTIC_LEARNED", "CONSTANT", "PROBABILISTIC",
-                                            "INCONCLUSIVE", "OUT_OF_SCOPE"})
+    self.assertEqual(set(verdict.ANSWERS), {"DETERMINISTIC", "DETERMINISTIC_LEARNED", "CONSTANT", "PROBABILISTIC", "INCONCLUSIVE", "OUT_OF_SCOPE"})
   def test_the_answer_says_yes_no_or_that_it_cannot_tell(self):
     for name in ("DETERMINISTIC", "DETERMINISTIC_LEARNED", "CONSTANT"): self.assertTrue(verdict.ANSWERS[name].startswith("Yes"), name)
     self.assertEqual(verdict.ANSWERS["DETERMINISTIC"], "Yes, deterministic.")
@@ -204,13 +197,11 @@ class TestTokenBlock(unittest.TestCase):
   def block(self, name, early=None, receipt=None, **more): return verdict.token_block({"tokens": early}, receipt, {"verdict": name, **more})
   def test_block_arithmetic(self):
     early, held = stats.token_stats([{"tokens": 1000}] * 100), stats.token_stats([{"tokens": 1200}] * 100)
-    receipt = {"n_heldout": 100, "tokens": held, **fallback(inside=25, outside=75)}
+    receipt = {"n_heldout": 100, "tokens": held}
     full = self.block("DETERMINISTIC", early, receipt)
     keys = ("per_run", "logged", "cases_with_tokens", "rule_share", "saved_per_run", "saved_logged")
     self.assertEqual([full[k] for k in keys], [1100.0, 220_000, 200, 1.0, 1100.0, 220_000])
-    core = self.block("DETERMINISTIC_CORE_FALLBACK", early, receipt)
-    self.assertEqual([core[k] for k in ("rule_share", "saved_per_run", "saved_logged")], [0.75, 825.0, 165_000])  # 75 of 100 held-back cases
-    self.assertIn("saved over the log = 0.75 x 220000 = 165000", core["arithmetic"])
+    self.assertIn("saved over the log = 1.0 x 220000 = 220000", full["arithmetic"])
     self.assertEqual(self.block("CONSTANT", early, receipt)["rule_share"], 1.0)
     for name in ("INCONCLUSIVE", "PROBABILISTIC", "OUT_OF_SCOPE"):
       self.assertEqual([self.block(name, early)[k] for k in ("saved_logged", "logged")], [0, 100_000])

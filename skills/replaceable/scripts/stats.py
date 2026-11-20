@@ -20,13 +20,12 @@ REQUEST_FILE = "replay_request.json"  # left in WORK_DIR by run.py when the host
 
 # the decision thresholds of the procedure (SKILL.md states the same numbers)
 MIN_TOTAL = 150  # logged cases needed before anything is tested
-MIN_HELDOUT = 60  # held-back cases needed for a replay verdict (and outside a fallback region)
+MIN_HELDOUT = 60  # held-back cases needed for a replay verdict
 CONFLICT_THRESHOLD = 0.05  # share of the repeated-input cases that disagree with the majority of their identical-input group
 MIN_CONFLICT_GROUPS = 2  # distinct inputs that must show a conflict before the loop is called PROBABILISTIC
 MAX_LEAN_CASES = 50_000  # one Lean run takes about this many cases; more runs into its timeout
 MIN_REPEAT_SHARE = 0.2  # below this almost every input is unique and the conflict scan cannot see anything
 BOUND_DETERMINISTIC = 0.95  # 95% lower bound on held-out agreement for DETERMINISTIC and CONSTANT
-BOUND_CORE = 0.80  # ... for DETERMINISTIC_CORE_FALLBACK
 BASELINE_ERROR_RATIO = 0.5  # the rule's error bound (1 - L) may be at most this share of the error of the most common output
 
 def sha256(data: str | bytes) -> str: return hashlib.sha256(data.encode() if isinstance(data, str) else data).hexdigest()
@@ -236,13 +235,6 @@ def conflict_reading(scan: dict[str, Any]) -> tuple[str, str]:
     return "one_group", (f"Over {CONFLICT_THRESHOLD:.0%} of the repeated cases conflict, but all for one input: a single group is not enough "
                          "to call the loop probabilistic. Continue to the rule.")
   return "noise", f"Repeated inputs agree (conflicts at or under {CONFLICT_THRESHOLD:.0%}). Continue to the rule."
-
-def fallback_stats(rows: Sequence[Row], predicted: Sequence[str], flags: Sequence[bool]) -> dict[str, Any]:
-  # containment counts for a core-plus-fallback rule: mismatches must sit inside the declared region
-  outside = [(p, r) for p, r, inside in zip(predicted, rows, flags) if not inside]
-  misses_outside = sum(p != r["output"] for p, r in outside)
-  return {"inside": sum(flags), "outside": len(outside), "misses_outside": misses_outside,
-          "outside_lower_bound": round(clopper_pearson_lower(len(outside) - misses_outside, len(outside)), 4)}
 
 def misses(rows: Sequence[Row], predicted: Sequence[str], limit: int) -> list[dict[str, Any]]:
   wrong = [(p, r) for p, r in zip(predicted, rows) if p != r["output"]][:limit]

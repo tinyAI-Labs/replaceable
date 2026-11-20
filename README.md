@@ -8,11 +8,10 @@ tokens the replacement would save.
 | Verdict | Meaning |
 |---|---|
 | `DETERMINISTIC` | a rule reproduces the held-back cases (95% lower bound on agreement >= 0.95, clearly better than a constant) |
-| `DETERMINISTIC_CORE_FALLBACK` | a rule covers most cases; a declared region is handed back to the LLM |
 | `DETERMINISTIC_LEARNED` | no readable rule, but a model learned from the early half reproduces the held-back half (99% lower bound >= 0.95, clearly better than a constant); the model is discarded, see below |
 | `CONSTANT` | every logged case has the same output |
 | `PROBABILISTIC` | identical inputs received different outputs |
-| `INCONCLUSIVE` | not enough evidence (too few cases, or no rule found); never read as "probabilistic" |
+| `INCONCLUSIVE` | not enough evidence (too few cases, no rule that reaches 95%, or a loop whose feedback is still moving); never read as "probabilistic" |
 | `OUT_OF_SCOPE` | the output is free text, not a typed decision |
 
 ## Install
@@ -48,7 +47,7 @@ override, a check) until it is right at least 95% of the time, or does not get t
 | example | the loop | verdict |
 |---|---|---|
 | `ticket_triage` | routes support tickets to a queue; one routing note per category, learned from corrections; enterprise urgent tickets escalate | DETERMINISTIC, once it has converged |
-| `expense_approval` | approves or escalates by a limit for each department, learned from reviewer overrides; a person decides the big amounts case by case | DETERMINISTIC_CORE_FALLBACK |
+| `expense_approval` | approves or escalates by a limit for each department, learned from reviewer overrides; a person decides the big amounts case by case, so no rule reaches 95% | INCONCLUSIVE |
 | `pr_labeler` | labels pull requests small, medium or large with its own limits for each area and author type: too many branches to read, a learned model reproduces it | DETERMINISTIC_LEARNED |
 | `refund_agent` | improves but plateaus near 80%: the same inputs still get different answers | PROBABILISTIC (it settles near 80%) |
 | `lead_router_memory` | reaches 95%, but enterprise leads go to the two reps in a rotation the loop keeps in its notes and the log does not carry | INCONCLUSIVE (hidden state) |
@@ -85,11 +84,11 @@ was made from, and the decision. From a trace or message-list export, roughly:
 ## Tokens and savings
 Log a token count per run as `tokens` (the run's total), or as the SDKs report it: `usage.input_tokens` + `usage.output_tokens` (cache tokens are
 added), `prompt_tokens` + `completion_tokens`, or `total_tokens`. The verdict then carries a `tokens` block and a `TOKENS:` line: tokens per run,
-the total over the log, the share of runs the rule would take over (all for `DETERMINISTIC` and `CONSTANT`, the share outside the fallback region
-for `DETERMINISTIC_CORE_FALLBACK`, none otherwise: `DETERMINISTIC_LEARNED` hands over no rule) and the tokens saved, with the arithmetic spelled out, e.g.
+the total over the log, the share of runs the rule would take over (all for `DETERMINISTIC` and `CONSTANT`, none otherwise: `DETERMINISTIC_LEARNED`
+hands over no rule) and the tokens saved, with the arithmetic spelled out, e.g.
 
-    TOKENS: 691600 tokens / 800 runs with a count (early + heldout half) = 864.5 per run; rule share 0.8775 (351 of 400 held-back cases lie outside
-    the fallback region; the rest stays with the LLM); saved per run = 0.8775 x 864.5 = 758.6; saved over the log = 0.8775 x 691600 = 606879
+    TOKENS: 691600 tokens / 800 runs with a count (early + heldout half) = 864.5 per run; rule share 1.0 (DETERMINISTIC: the rule takes
+    over every run); saved per run = 1.0 x 864.5 = 864.5; saved over the log = 1.0 x 691600 = 691600
 
 Without a count the answer is `unknown`: nothing is estimated from text length, because a log line shows the source material at best, not the prompt,
 the tool calls or the retries. Token counts never reach the rule or the verdict. The `Tokens:` line quotes the tokens per run and over the log, and a monthly pace when the log's `ts` are ISO timestamps that span at least a day (at the pace of the early half; a counter says nothing about time). It quotes a cost only when you give a price: `run.py --usd-per-mtok 3` (what you pay per million tokens, one blended rate); the skill has no price table.
