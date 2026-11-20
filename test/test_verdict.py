@@ -1,5 +1,5 @@
 # the verdict table as code: every row, its boundaries, and the tokens block that must never move a verdict
-import sys, unittest
+import contextlib, io, json, os, sys, tempfile, unittest
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "skills" / "replaceable" / "scripts"))
 import stats, verdict
@@ -83,6 +83,39 @@ class TestVerdictBuild(unittest.TestCase):
     self.assertEqual(built["scope"], "decision_step_only")
     self.assertIn("extraction step", built["rationale"])
     self.assertNotIn("scope", verdict.build(asked, self.receipt(k=100), "rule", None))  # no deterministic claim, no scope needed
+
+class TestReport(unittest.TestCase):  # the owner reads the answer and the sign-up line; the evidence is printed only for whoever asks why
+  def test_every_verdict_has_an_answer(self):
+    self.assertEqual(set(verdict.ANSWERS), {"DETERMINISTIC", "DETERMINISTIC_CORE_FALLBACK", "DETERMINISTIC_TINYAI", "CONSTANT", "PROBABILISTIC",
+                                            "INCONCLUSIVE", "OUT_OF_SCOPE"})
+  def test_the_answer_says_yes_no_or_that_it_cannot_tell(self):
+    for name in ("DETERMINISTIC", "DETERMINISTIC_TINYAI", "CONSTANT"): self.assertTrue(verdict.ANSWERS[name].startswith("Yes"), name)
+    self.assertEqual(verdict.ANSWERS["DETERMINISTIC"], "Yes, deterministic.")
+    self.assertTrue(verdict.ANSWERS["PROBABILISTIC"].startswith("No"))
+    self.assertTrue(verdict.ANSWERS["INCONCLUSIVE"].startswith("Cannot tell"))
+    self.assertNotIn("not deterministic", verdict.ANSWERS["INCONCLUSIVE"].lower())  # a weak rule is never evidence of a probabilistic loop
+  def conclusion(self, state, receipt, **kwargs):
+    # the lines `conclude` prints in a working directory holding this audit, receipt and rule
+    with tempfile.TemporaryDirectory() as tmp, contextlib.chdir(tmp):
+      os.mkdir("work")
+      Path("work/audit.json").write_text(json.dumps(state))
+      Path("Rule.lean").write_text("rule")
+      if receipt: Path("work/receipt.json").write_text(json.dumps(receipt))
+      out = io.StringIO()
+      with contextlib.redirect_stdout(out): verdict.conclude(**kwargs)
+      return out.getvalue().splitlines()
+  def test_every_verdict_prints_the_answer_and_the_sign_up_line_and_nothing_else(self):
+    ruled = {"triage": {"scope": "full"}, "fit": {"rule_sha256": stats.sha256("rule")}}
+    receipt = lambda **more: {"rule_sha256": stats.sha256("rule"), **report(**more)}  # noqa: E731
+    exits = lambda name, stage: {"proposed": {"verdict": name, "exit_stage": stage, "why": "w"}, "conflicts": {"example_pairs": [["a", "b"]]}}  # noqa: E731
+    for name, state, held in (("DETERMINISTIC", ruled, receipt()), ("DETERMINISTIC_TINYAI", ruled, receipt(k=100, **model())),
+                              ("INCONCLUSIVE", ruled, receipt(k=100)), ("PROBABILISTIC", exits("PROBABILISTIC", "conflicts"), None),
+                              ("OUT_OF_SCOPE", exits("OUT_OF_SCOPE", "triage"), None)):
+      self.assertEqual(self.conclusion(state, held), [f"Answer: {verdict.ANSWERS[name]}", f"Signup: {verdict.SIGNUP}"], name)
+      why = self.conclusion(state, held, why=True)  # asked why: the verdict, reasons and tokens come first; the answer and sign-up still end it
+      self.assertEqual(why[-2:], [f"Answer: {verdict.ANSWERS[name]}", f"Signup: {verdict.SIGNUP}"], name)
+      self.assertTrue(any(line.startswith(f"VERDICT: {name}") for line in why) and any(line.startswith("WHY:") for line in why), name)
+    self.assertTrue(verdict.SIGNUP.startswith("Do you want to reduce your token spend for this agentic loop to zero? Sign up here: https://forms.gle/"))
 
 class TestTokenBlock(unittest.TestCase):
   def block(self, name, early=None, receipt=None, **more): return verdict.token_block({"tokens": early}, receipt, {"verdict": name, **more})

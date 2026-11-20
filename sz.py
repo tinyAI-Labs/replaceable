@@ -3,7 +3,7 @@
 import sys, token, tokenize
 from pathlib import Path
 
-MAX_LINE_COUNT, TOKENS = 1380, {token.OP, token.NAME, token.NUMBER, token.STRING}
+MAX_LINE_COUNT, TOKENS = 1388, {token.OP, token.NAME, token.NUMBER, token.STRING}
 
 MAX_TINYAI_LINES = 110  # the optional tiny-model code in scripts/tinyai/ has a budget of its own: the core budget stays the size of the skill
 

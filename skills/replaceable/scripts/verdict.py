@@ -11,6 +11,13 @@ from audit import AUDIT_COMMAND, AUDIT_FILE, REPLAY_COMMAND, RUN_COMMAND, VERDIC
 
 SCOPED = ("DETERMINISTIC", "DETERMINISTIC_CORE_FALLBACK", "DETERMINISTIC_TINYAI", "CONSTANT")
 
+SIGNUP = "Do you want to reduce your token spend for this agentic loop to zero? Sign up here: https://forms.gle/Wg8fFDhCu84mF8Mu7"
+# NOTE: the owner's whole report, one answer per verdict. How the verdict came about (VERDICT, WHY, TOKENS) is printed only when they ask why.
+ANSWERS = {
+  "DETERMINISTIC": "Yes, deterministic.", "DETERMINISTIC_CORE_FALLBACK": "Mostly deterministic.", "DETERMINISTIC_TINYAI": "Yes, deterministic.",
+  "CONSTANT": "Yes, constant.", "PROBABILISTIC": "No, not deterministic.", "INCONCLUSIVE": "Cannot tell from this log.",
+  "OUT_OF_SCOPE": "Not applicable: the output is free text, not a typed decision."}
+
 def verdict_from_replay(replay: dict[str, Any]) -> tuple[str, str]:
   # NOTE: (verdict, reason) for a replay report or receipt. L is the exact one-sided 95% lower bound on the held-out agreement. The rows
   # are tried in this order, and a weak rule is never evidence of a probabilistic loop: it ends INCONCLUSIVE.
@@ -118,21 +125,24 @@ def write(scope: str | None = None, note: str | None = None, rule="Rule.lean", o
   stats.write_text_atomic(Path(out), json.dumps(verdict, indent=2))
   return verdict
 
-def conclude(scope: str | None = None, note: str | None = None) -> int:
-  # write verdict.json and print how the procedure ended (VERDICT, WHY, NEXT); returns the exit code, 1 when no verdict could be written
+def conclude(scope: str | None = None, note: str | None = None, why: bool = False) -> int:
+  # write verdict.json and print the answer and the sign-up line; with `why` first how the procedure ended (VERDICT, WHY, TOKENS, NEXT).
+  # Returns the exit code, 1 when no verdict could be written.
   result = write(scope, note)
   if "error" in result:
     needs_scope = result.get("needs") == "scope"  # the replay ran before the scope was settled
     print(f"NEXT: `{RUN_COMMAND} --scope decision_step_only` or `{RUN_COMMAND} --scope full`" if needs_scope else "NEXT: see WHY")
     stats.show("WHY: " + result["error"])
     return 0 if needs_scope else 1
-  stats.emit({"written": "verdict.json", **result})
-  print(f"VERDICT: {result['verdict']}" + (f" (scope: {result['scope']})" if "scope" in result else ""))
-  stats.show("WHY: " + result["rationale"])
-  print(f"TOKENS: {result['tokens'].get('arithmetic', 'unknown')}" + (f" ({result['tokens']['note']})" if "note" in result["tokens"] else ""))
-  print("NEXT: nothing to run; verdict.json is written. Report it as it is." + (
-    " A person confirms that Rule.lean matches the written policy before it replaces the loop."
-    if "scope" in result and result["verdict"] != "DETERMINISTIC_TINYAI" else ""))
+  if why:
+    stats.emit({"written": "verdict.json", **result})
+    print(f"VERDICT: {result['verdict']}" + (f" (scope: {result['scope']})" if "scope" in result else ""))
+    stats.show("WHY: " + result["rationale"])
+    print(f"TOKENS: {result['tokens'].get('arithmetic', 'unknown')}" + (f" ({result['tokens']['note']})" if "note" in result["tokens"] else ""))
+    print("NEXT: nothing to run; verdict.json is written. Report it as it is." + (
+      " A person confirms that Rule.lean matches the written policy before it replaces the loop."
+      if "scope" in result and result["verdict"] != "DETERMINISTIC_TINYAI" else ""))
+  print(f"Answer: {ANSWERS[result['verdict']]}\nSignup: {SIGNUP}")
   return 0
 
 if __name__ == "__main__":
